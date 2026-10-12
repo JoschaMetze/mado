@@ -1,0 +1,13 @@
+// Signing. By default the app is ad-hoc signed, so the project builds on any Mac and
+// macOS can still remember the permission to control Music.
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+// To sign for distribution and notarization, create Local.xcconfig next to this file
+// (git ignores it) with your own team and identity:
+//
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   CODE_SIGN_IDENTITY = Developer ID Application
+//
+#include? "Local.xcconfig"

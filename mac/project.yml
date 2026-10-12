@@ -1,0 +1,66 @@
+# XcodeGen project for the Mado menu bar app. Generate with `xcodegen`, or just run
+# scripts/build.sh, which does it for you. The .xcodeproj is not checked in.
+name: Mado
+options:
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Mado:
+    type: application
+    platform: macOS
+    sources: [Mado]
+    info:
+      path: Mado/Info.plist
+      properties:
+        CFBundleDisplayName: Mado
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Menu bar only: no Dock icon, no main window.
+        LSUIElement: true
+        NSAppleEventsUsageDescription: Mado reads what is playing in Music or Spotify so your frame can show it, and passes on play and pause from the frame.
+        NSLocalNetworkUsageDescription: Mado sends what is playing to the Mado hub on your network.
+        # A hub on a home network is usually plain http://, which macOS blocks by default.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    entitlements:
+      path: Mado/Mado.entitlements
+      properties:
+        # Needed to script Music and Spotify once the hardened runtime is on, which
+        # notarization requires.
+        com.apple.security.automation.apple-events: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.co.xenocode.mado.menubar
+      configs:
+        # Release only: the hardened runtime refuses to load the test bundle into an
+        # ad-hoc signed app, and tests run against Debug.
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
+  MadoTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [MadoTests]
+    dependencies:
+      - target: Mado
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.co.xenocode.mado.menubar.tests
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: $(TEST_HOST)
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Mado.app/Contents/MacOS/Mado
+schemes:
+  Mado:
+    build:
+      targets:
+        Mado: all
+    test:
+      targets: [MadoTests]

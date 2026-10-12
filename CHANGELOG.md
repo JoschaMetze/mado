@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Mado for Mac: a Swift menu bar app replaces the command-line `mado-nowplaying` helper. It
+  reports Apple Music and Spotify, can pause sharing, starts at login if asked, and builds
+  from the command line with XcodeGen. Scripts for Developer ID signing and notarization.
 - Hub: `MADO_FRAME_BIND` opens a second port that serves only what a frame needs, so the
   API, MCP and web page can stay on a private network.
 - Hub: exits promptly on SIGTERM, so `docker stop` no longer waits to kill it.

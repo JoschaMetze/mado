@@ -20,8 +20,8 @@ it stays smooth on very modest hardware.
 - **Liquid alerts.** Anything on your network can put a message on the glass: a *whisper*
   (a bead at the edge), a *nudge* (one line that drains away) or *urgent* (stays until
   someone taps it).
-- **Now playing.** The cover of whatever Apple Music is playing on your Mac takes over the
-  screen while music plays. Tap the cover to fill the screen with it; tap the text to play or
+- **Now playing.** The cover of whatever Apple Music or Spotify is playing on your Mac takes
+  over the screen while music plays. A small menu bar app on the Mac does the reporting. Tap the cover to fill the screen with it; tap the text to play or
   pause.
 - **MCP and HTTP.** Agents get tools; scripts get plain endpoints.
 - **The rail.** Tap or swipe the left edge for scenes, brightness and the way back to the
@@ -41,7 +41,7 @@ Planned: Tama (a small on-screen companion), canvases that agents can draw on, n
 ```
  senders                         hub                          frame
  ───────                         ───                          ─────
- Mac helper (now playing) ─┐
+ Mac menu bar app ─────────┐
  agents over MCP ──────────┼──▶  mado-hub  ◀── one socket ──  Mado app
  curl, scripts, cron ──────┘     (Rust)       frame dials out (Kotlin)
 ```
@@ -50,7 +50,7 @@ Planned: Tama (a small on-screen companion), canvases that agents can draw on, n
 |---|---|
 | `hub/` | `mado-hub`, the brain. Rust. Serves the frame's WebSocket, an HTTP API, MCP, and a web page where all configuration lives. Runs on a home server (Docker or not) or on a Mac. |
 | `frame-app/` | The Android app that draws everything. Kotlin, plain Canvas views, `minSdk 23`. |
-| `nowplaying/` | `mado-nowplaying`, a macOS helper that reports Apple Music to the hub. Rust. |
+| `mac/` | Mado for Mac, a menu bar app that reports what Apple Music or Spotify is playing. Swift. |
 
 The frame holds no secrets and listens on no ports: it opens one outbound connection to the
 hub and draws what it is told. Its clock and weather keep working when the hub is down.
@@ -82,13 +82,16 @@ before doing.
    The hub address is remembered. Put machine-specific setup such as `JAVA_HOME` or
    `ANDROID_SERIAL` in `frame-app/env.local.sh`.
 
-3. **Now playing** (optional), on the Mac with the music:
+3. **The menu bar app** (optional), on the Mac with the music. It needs Xcode and
+   [XcodeGen](https://github.com/yonaskolb/XcodeGen):
 
    ```sh
-   cd nowplaying && cargo run --release -- http://HOST:7878
+   cd mac && scripts/build.sh install
    ```
 
-   macOS asks once for permission to control Music. The helper never launches Music.
+   Choose "Hub Address…" from its menu and enter the hub's address. macOS asks once for
+   permission to control Music or Spotify; the app never launches either. The menu also has
+   a switch for each player, one to pause sharing, and "Start at Login".
 
 You need `adb` access to the frame. For most photo frames that means rooting it first, which
 depends on the device and is not covered here.
@@ -109,7 +112,7 @@ curl -X POST http://HOST:7878/api/notify \
 | `POST /api/project` | `name`, `status` (`on_track`, `needs_you`, `blocked`, `done`, `archived`), optional `note`, `progress` 0 to 1 |
 | `GET /api/look` | JPEG of what the frame is showing |
 | `GET /api/state` | Connected frames, now playing, today's painting, projects, config, recent activity |
-| `POST /api/now_playing` | What a player is doing; see `nowplaying/src/main.rs` for the shape. A helper for another player (Spotify, say) posts the same JSON. |
+| `POST /api/now_playing` | What a player is doing: `state` (`playing`, `paused`, `stopped`), `title`, `artist`, `album`, `source`, `position_s`, `duration_s`, and `art_b64` (the cover, JPEG or PNG) when the track changes. Repeat it at least every 30 seconds while playing. |
 
 | MCP tool | |
 |---|---|
@@ -149,9 +152,11 @@ landscape screen.
 ```sh
 cd hub && cargo test                          # hub
 cd frame-app && ./gradlew testDebugUnitTest   # forecast wording
+cd mac && scripts/build.sh test               # menu bar app
 ```
 
-`cargo fmt` and `cargo clippy` are expected to be clean. See [CHANGELOG.md](CHANGELOG.md)
+`cargo fmt` and `cargo clippy` are expected to be clean. To sign the Mac app with your own
+Developer ID and notarize it, see `mac/Signing.xcconfig` and `mac/scripts/notarize.sh`. See [CHANGELOG.md](CHANGELOG.md)
 for what changed.
 
 ## Credits

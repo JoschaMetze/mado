@@ -17,16 +17,12 @@ jobs:
       - run: cargo clippy --locked -- -D warnings
       - run: cargo test --locked
 
-  nowplaying:
+  mac-app:
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: nowplaying
     steps:
       - uses: actions/checkout@v4
-      - run: cargo fmt --check
-      - run: cargo clippy --locked -- -D warnings
-      - run: cargo build --locked
+      - run: brew install xcodegen
+      - run: mac/scripts/build.sh test
 
   frame-app:
     runs-on: ubuntu-latest

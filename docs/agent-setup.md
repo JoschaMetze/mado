@@ -12,7 +12,7 @@ Three pieces (see the [README](../README.md) for what they do):
 
 1. **The hub** (`hub/`), on a machine that is always on and that the frame can reach.
 2. **The frame app** (`frame-app/`), installed on the frame over `adb`.
-3. **The now-playing helper** (`nowplaying/`), optional, on a Mac that plays Apple Music.
+3. **The menu bar app** (`mac/`), optional, on a Mac that plays Apple Music or Spotify.
 
 The frame makes one outbound WebSocket connection to the hub. Nothing connects in to the
 frame, and the frame holds no secrets.
@@ -198,16 +198,26 @@ image of the frame's screen, which is how an agent checks its own work.
 
 ## Step 8 (optional): now playing from a Mac
 
-On the Mac that plays the music:
+On the Mac that plays the music. This needs Xcode and
+[XcodeGen](https://github.com/yonaskolb/XcodeGen); check for both before installing anything.
 
 ```sh
-cd nowplaying && cargo run --release -- http://HUB_ADDRESS:7878
+cd mac && scripts/build.sh install
 ```
 
-macOS will ask the owner to allow control of Music; they must click Allow. The helper never
-launches Music itself. When a track plays, the frame switches to the cover; two minutes
-after a pause it returns to the dashboard. To keep the helper running across logins, offer to
-set up a LaunchAgent, and let the owner decide.
+That builds Mado.app, copies it to `/Applications` and opens it. It lives in the menu bar
+and has no window. Then, with the owner:
+
+- Choose **Hub Address…** in its menu and enter the hub's address.
+- macOS asks the owner to allow Mado to control Music (and Spotify, if used). They must
+  click Allow; you cannot do it for them. Until they do, the app reports nothing.
+- **Start at Login** is a switch in the same menu. Ask before turning it on.
+
+The app never launches a player. When a track plays, the frame switches to the cover; two
+minutes after a pause it returns to the dashboard.
+
+The build is ad-hoc signed unless `mac/Local.xcconfig` names a signing team. That is fine on
+the Mac that built it. Do not put anyone's team ID or identity in a tracked file.
 
 ## Things that will confuse you
 

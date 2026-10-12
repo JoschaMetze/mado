@@ -1,4 +1,4 @@
-//! Now playing: a helper on the machine with the music posts the track here; the hub prepares
+//! Now playing: an app on the machine with the music posts the track here; the hub prepares
 //! the artwork for the frame's weak GPU and relays it. Taps on the frame travel back to the
 //! helper as commands it long-polls for.
 
