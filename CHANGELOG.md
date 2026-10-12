@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Art of the day can be steered: a period (before 1800, the 1800s, 1860 onwards), a subject
+  (landscapes, sea and water, portraits, still lifes, flowers, animals, towns), and things
+  to leave out (religious scenes, nudes, death and war). Set on the hub's page, which then
+  picks a new painting that fits and says how many it chose from.
+
 ## 0.2.1
 
 - An icon: a framed painting with an alert bead on its edge. Used by the Mac app, the frame

@@ -232,3 +232,11 @@ li{min-width:0}
   .t-workbench .side section:first-child{border-top:1px solid var(--line)}
   .t-workbench #projects,.t-workbench #recent{padding-right:0}
 }
+
+/* what paintings to show: a quiet strip under the painting */
+.taste{border-top:1px solid var(--line);padding-top:18px;margin-top:6px}
+.taste .pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.taste .checks{display:flex;flex-wrap:wrap;gap:8px 22px;align-items:center}
+.taste .check{display:flex;flex-direction:row;align-items:center;gap:8px;color:var(--fg);cursor:pointer}
+.taste .check input{width:auto;padding:0;accent-color:var(--accent)}
+.taste button{width:auto}

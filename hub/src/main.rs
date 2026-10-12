@@ -50,6 +50,9 @@ pub struct Config {
     /// How the hub's own page looks; the frame ignores it. Empty means the default.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub theme: String,
+    /// Which paintings the art of the day is chosen from.
+    #[serde(default, skip_serializing_if = "art::Prefs::is_any")]
+    pub art: art::Prefs,
 }
 
 /// A place the frame shows weather for. The frame fetches the forecast itself.
@@ -363,6 +366,7 @@ async fn main() {
         .route("/ui/places/here", post(ui::place_here))
         .route("/ui/projects", post(ui::project))
         .route("/ui/art/another", post(ui::art_another))
+        .route("/ui/art/prefs", post(ui::art_prefs))
         .route("/ui/theme", post(ui::theme))
         .route("/api/notify", post(api_notify))
         .route("/api/state", get(api_state))

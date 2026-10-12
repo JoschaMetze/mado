@@ -14,6 +14,7 @@ it stays smooth on very modest hardware.
   the Art Institute of Chicago. The frame shows it with the time, the weather and your
   projects in one of four layouts, all coloured from the painting itself. Tap the label to
   read about it and get a QR code for the museum's page; tap elsewhere for the next layout.
+  You choose what it draws from: a period, a subject, and what to leave out.
 - **Weather in a sentence.** "Rain easing by three", with the temperature and sunset. Other
   places you care about get a line each, with their local time. The frame fetches forecasts
   itself, so weather keeps working when the hub is down.

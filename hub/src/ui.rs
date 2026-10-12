@@ -272,6 +272,57 @@ fn now_playing_card(np: &Value) -> String {
     )
 }
 
+/// The choices for which paintings the museum is asked for.
+fn taste_form(prefs: &art::Prefs, pool: Option<u64>) -> String {
+    let options = |choices: &[(&str, &str, &[&str])], chosen: &str| -> String {
+        choices
+            .iter()
+            .map(|(key, label, _)| {
+                format!(
+                    r#"<option value="{key}"{}>{label}</option>"#,
+                    if *key == chosen { " selected" } else { "" }
+                )
+            })
+            .collect()
+    };
+    let periods: String = art::PERIODS
+        .iter()
+        .map(|(key, label)| {
+            format!(
+                r#"<option value="{key}"{}>{label}</option>"#,
+                if *key == prefs.period { " selected" } else { "" }
+            )
+        })
+        .collect();
+    let avoid: String = art::AVOIDABLE
+        .iter()
+        .map(|(key, label, _)| {
+            format!(
+                r#"<label class="check"><input type="checkbox" name="avoid_{key}" value="1"{}>{label}</label>"#,
+                if prefs.avoid.iter().any(|a| a == key) {
+                    " checked"
+                } else {
+                    ""
+                }
+            )
+        })
+        .collect();
+    let pool = match pool {
+        Some(n) => format!("Today's painting was chosen from {n} that fit."),
+        None => String::new(),
+    };
+    format!(
+        r#"<form class="taste wide" method="post" action="/ui/art/prefs">
+<div class="head"><p class="eyebrow">What to show</p></div>
+<div class="pick"><label>Period<select name="period">{periods}</select></label>
+<label>Subject<select name="subject">{subjects}</select></label></div>
+<div class="checks"><span class="muted small">Leave out</span>{avoid}</div>
+<div class="actions"><button>Save and pick again</button><span class="muted small">{pool}</span></div>
+</form>"#,
+        subjects = options(&art::SUBJECTS, &prefs.subject),
+    )
+}
+
 fn painting_card(art: &Value) -> String {
     if art.is_null() {
         return r#"<p class="muted wide">The frame asks for a painting when it connects. Nothing has been asked for yet.</p>"#
@@ -374,6 +425,7 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
     let np = now_playing_card(&state["now_playing"]);
     let projects = project_rows(&state["projects"]);
     let painting = painting_card(&state["art"]);
+    let taste = taste_form(&hub.config.read().unwrap().art, state["art"]["pool"].as_u64());
     let palette = &state["art"]["palette"];
     let tint = format!(
         "--p1:{};--p2:{};--p3:{}",
@@ -432,7 +484,7 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
   </div>
 </div>
 <div class="grid">
-  <section class="art wide" id="art">{painting}</section>
+  <section class="art wide" id="art">{painting}{taste}</section>
   <section id="projects"><div class="head"><p class="eyebrow">On the dashboard</p><h2>Projects</h2></div>
     <ul class="rows">{projects}</ul>
     <details><summary>Add a project</summary>
@@ -543,6 +595,49 @@ pub async fn art_another(State(hub): State<Shared>) -> Redirect {
             )
         }
         None => back("art", Err("There is no painting to replace yet.".into())),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct Taste {
+    #[serde(default)]
+    period: String,
+    #[serde(default)]
+    subject: String,
+    avoid_religious: Option<String>,
+    avoid_nudes: Option<String>,
+    avoid_death: Option<String>,
+}
+
+/// Save what kinds of painting to show, then replace today's with one that fits.
+pub async fn art_prefs(State(hub): State<Shared>, Form(t): Form<Taste>) -> Redirect {
+    let avoid = [
+        ("religious", t.avoid_religious),
+        ("nudes", t.avoid_nudes),
+        ("death", t.avoid_death),
+    ]
+    .into_iter()
+    .filter(|(_, ticked)| ticked.is_some())
+    .map(|(key, _)| key.to_owned())
+    .collect();
+    let prefs = match art::Prefs::chosen(&t.period, &t.subject, avoid) {
+        Ok(prefs) => prefs,
+        Err(e) => return back("art", Err(e)),
+    };
+    hub.config.write().unwrap().art = prefs;
+    if let Err(e) = hub.config_changed() {
+        return back("art", Err(format!("Could not save: {e}")));
+    }
+    let day = hub.art.lock().unwrap().as_ref().map(|a| a.day.clone());
+    match day {
+        Some(day) => {
+            art::want(hub.clone(), day, true);
+            back(
+                "art",
+                Ok("Saved. Asking the museum for a painting that fits; reload in a few seconds."),
+            )
+        }
+        None => back("art", Ok("Saved. It applies from the next painting.")),
     }
 }
 

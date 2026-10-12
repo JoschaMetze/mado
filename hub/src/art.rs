@@ -19,6 +19,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, GrayImage, ImageFormat, Luma};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::Shared;
@@ -29,6 +30,146 @@ const IIIF: &str = "https://www.artic.edu/iiif/2";
 const AGENT: &str = "mado-hub (open-source photo-frame project)";
 const MAX_IMAGE_BYTES: u64 = 20 << 20;
 const TEXT_CHARS: usize = 460;
+
+/// Periods the owner can limit the paintings to: key and label.
+pub const PERIODS: [(&str, &str); 4] = [
+    ("", "Any period"),
+    ("old", "Before 1800"),
+    ("c19", "The 1800s"),
+    ("modern", "1860 onwards"),
+];
+
+/// Subjects to show only: key, label, and the museum's subject tags that count.
+pub const SUBJECTS: [(&str, &str, &[&str]); 8] = [
+    ("", "Anything", &[]),
+    ("landscapes", "Landscapes", &["landscapes", "landscape"]),
+    (
+        "water",
+        "Sea and water",
+        &["water", "sea", "seascapes", "boats", "rivers", "ocean"],
+    ),
+    ("portraits", "Portraits", &["portraits", "portrait"]),
+    ("still_life", "Still lifes", &["still life", "still lifes"]),
+    ("flowers", "Flowers", &["flowers"]),
+    ("animals", "Animals", &["animals"]),
+    (
+        "city",
+        "Towns and buildings",
+        &[
+            "architecture",
+            "building",
+            "buildings",
+            "urban life",
+            "cityscapes",
+            "city",
+        ],
+    ),
+];
+
+/// Subjects to leave out: key, label, and the museum's subject tags that rule a work out.
+/// The tags are matched exactly, so each list carries the spellings the museum uses.
+pub const AVOIDABLE: [(&str, &str, &[&str]); 3] = [
+    (
+        "religious",
+        "Religious scenes",
+        &[
+            "Christian subjects",
+            "Christianity",
+            "religion",
+            "religious",
+            "saints",
+            "religious figures",
+            "biblical",
+            "religious scenes",
+            "Jesus",
+            "Virgin Mary",
+            "cross",
+            "Crucifixion",
+            "Madonna and Child",
+            "angels",
+            "Buddhism",
+            "Buddha",
+            "gods",
+            "deities",
+        ],
+    ),
+    (
+        "nudes",
+        "Nudes",
+        &["nudes", "nude", "female nudes", "male nudes", "nudity"],
+    ),
+    (
+        "death",
+        "Death and war",
+        &["death", "Mourning", "war", "violence", "battles", "martyrdom", "skulls"],
+    ),
+];
+
+/// Not every religious painting is tagged as one, so its title is checked as well.
+const RELIGIOUS_TITLE_WORDS: &str = "Christ Madonna Crucifixion Annunciation Virgin Saint Holy";
+
+/// What the owner wants the art of the day chosen from. Empty means anything.
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Prefs {
+    #[serde(default)]
+    pub period: String,
+    #[serde(default)]
+    pub subject: String,
+    #[serde(default)]
+    pub avoid: Vec<String>,
+}
+
+impl Prefs {
+    pub fn is_any(&self) -> bool {
+        *self == Prefs::default()
+    }
+
+    /// Build from what a form sent, refusing anything that is not one of the choices.
+    pub fn chosen(period: &str, subject: &str, avoid: Vec<String>) -> Result<Prefs, String> {
+        if !PERIODS.iter().any(|p| p.0 == period) {
+            return Err("There is no such period.".into());
+        }
+        if !SUBJECTS.iter().any(|s| s.0 == subject) {
+            return Err("There is no such subject.".into());
+        }
+        if avoid.iter().any(|a| !AVOIDABLE.iter().any(|known| known.0 == a)) {
+            return Err("There is no such thing to leave out.".into());
+        }
+        Ok(Prefs {
+            period: period.to_owned(),
+            subject: subject.to_owned(),
+            avoid,
+        })
+    }
+
+    /// The search clauses these choices add: what a work must match, and what rules it out.
+    fn clauses(&self) -> (Vec<Value>, Vec<Value>) {
+        let mut filter = Vec::new();
+        let mut must_not = Vec::new();
+        match self.period.as_str() {
+            "old" => filter.push(json!({ "range": { "date_end": { "lte": 1799 } } })),
+            "c19" => {
+                filter.push(json!({ "range": { "date_start": { "gte": 1800 } } }));
+                filter.push(json!({ "range": { "date_end": { "lte": 1899 } } }));
+            }
+            "modern" => filter.push(json!({ "range": { "date_start": { "gte": 1860 } } })),
+            _ => {}
+        }
+        if let Some((_, _, tags)) = SUBJECTS.iter().find(|s| s.0 == self.subject && !s.2.is_empty()) {
+            filter.push(json!({ "terms": { "subject_titles.keyword": tags } }));
+        }
+        for (key, _, tags) in AVOIDABLE
+            .iter()
+            .filter(|a| self.avoid.iter().any(|chosen| chosen == a.0))
+        {
+            must_not.push(json!({ "terms": { "subject_titles.keyword": tags } }));
+            if *key == "religious" {
+                must_not.push(json!({ "match": { "title": RELIGIOUS_TITLE_WORDS } }));
+            }
+        }
+        (filter, must_not)
+    }
+}
 
 pub struct Daily {
     pub version: u64,
@@ -111,7 +252,8 @@ fn load_or_fetch(hub: &Shared, day: &str, salt: u64, another: bool) -> Result<Da
             (meta, image, salt)
         }
         None => {
-            let (mut meta, image) = fetch(day, salt)?;
+            let prefs = hub.config.read().unwrap().art.clone();
+            let (mut meta, image) = fetch(day, salt, &prefs)?;
             meta["salt"] = json!(salt);
             if let Some(dir) = meta_path.parent() {
                 let _ = std::fs::create_dir_all(dir);
@@ -132,10 +274,17 @@ fn load_or_fetch(hub: &Shared, day: &str, salt: u64, another: bool) -> Result<Da
     })
 }
 
-fn fetch(day: &str, salt: u64) -> Result<(Value, Vec<u8>), String> {
+fn fetch(day: &str, salt: u64, prefs: &Prefs) -> Result<(Value, Vec<u8>), String> {
     let mut hasher = DefaultHasher::new();
     (day, salt).hash(&mut hasher);
     let seed = hasher.finish() % 1_000_000_000;
+    let (mut filter, must_not) = prefs.clauses();
+    filter.extend([
+        json!({ "term": { "is_public_domain": true } }),
+        json!({ "exists": { "field": "image_id" } }),
+        json!({ "exists": { "field": "description" } }),
+        json!({ "terms": { "artwork_type_title.keyword": ["Painting"] } }),
+    ]);
     let query = json!({
         "resources": "artworks",
         "fields": ["id", "title", "artist_display", "date_display", "medium_display", "image_id",
@@ -143,12 +292,7 @@ fn fetch(day: &str, salt: u64) -> Result<(Value, Vec<u8>), String> {
         "boost": false,
         "limit": 1,
         "query": { "function_score": {
-            "query": { "bool": { "filter": [
-                { "term": { "is_public_domain": true } },
-                { "exists": { "field": "image_id" } },
-                { "exists": { "field": "description" } },
-                { "terms": { "artwork_type_title.keyword": ["Painting"] } },
-            ] } },
+            "query": { "bool": { "filter": filter, "must_not": must_not } },
             "boost_mode": "replace",
             "random_score": { "field": "id", "seed": seed },
         } },
@@ -160,7 +304,9 @@ fn fetch(day: &str, salt: u64) -> Result<(Value, Vec<u8>), String> {
         .map_err(|e| format!("museum search: {e}"))?
         .into_json()
         .map_err(|e| format!("museum search: {e}"))?;
-    let work = found["data"].get(0).ok_or("the museum returned no painting")?;
+    let work = found["data"]
+        .get(0)
+        .ok_or("no painting fits those choices; loosen them on the hub's page")?;
     let image_id = work["image_id"].as_str().ok_or("the painting has no image")?;
 
     let mut original = Vec::new();
@@ -205,6 +351,8 @@ fn fetch(day: &str, salt: u64) -> Result<(Value, Vec<u8>), String> {
         "width": img.width(),
         "height": img.height(),
         "palette": palette(&img),
+        // How many paintings fitted the owner's choices when this one was picked.
+        "pool": found["pagination"]["total"],
     });
     Ok((meta, jpeg))
 }
@@ -438,6 +586,60 @@ mod tests {
     fn qr_is_a_png() {
         let png = qr_png("https://www.artic.edu/artworks/1").unwrap();
         assert_eq!(&png[1..4], b"PNG");
+    }
+
+    #[test]
+    fn no_choices_add_no_clauses() {
+        let (filter, must_not) = Prefs::default().clauses();
+        assert!(filter.is_empty() && must_not.is_empty());
+        assert!(Prefs::default().is_any());
+    }
+
+    #[test]
+    fn choices_become_search_clauses() {
+        let prefs = Prefs::chosen("modern", "landscapes", vec!["religious".into(), "nudes".into()]).unwrap();
+        let (filter, must_not) = prefs.clauses();
+        assert_eq!(filter[0], json!({ "range": { "date_start": { "gte": 1860 } } }));
+        assert_eq!(
+            filter[1]["terms"]["subject_titles.keyword"],
+            json!(["landscapes", "landscape"])
+        );
+        // Religious adds a title check on top of its tags; nudes is tags only.
+        assert_eq!(must_not.len(), 3);
+        assert!(must_not[1]["match"]["title"].as_str().unwrap().contains("Madonna"));
+    }
+
+    #[test]
+    fn unknown_choices_are_refused() {
+        assert!(Prefs::chosen("future", "", vec![]).is_err());
+        assert!(Prefs::chosen("", "cats", vec![]).is_err());
+        assert!(Prefs::chosen("", "", vec!["mondays".into()]).is_err());
+    }
+
+    /// Talks to the museum, so it only runs when asked: `cargo test -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn the_museum_honours_the_choices() {
+        let everything = fetch("2026-01-01", 0, &Prefs::default()).unwrap().0;
+        let prefs = Prefs::chosen("modern", "landscapes", vec!["religious".into()]).unwrap();
+        for salt in 0..3 {
+            let (meta, image) = fetch("2026-01-01", salt, &prefs).unwrap();
+            println!(
+                "{} | {} | {} | from {}",
+                meta["title"], meta["artist"], meta["date"], meta["pool"]
+            );
+            assert!(!image.is_empty());
+            assert!(meta["pool"].as_u64().unwrap() < everything["pool"].as_u64().unwrap());
+        }
+        let nothing = Prefs::chosen(
+            "old",
+            "flowers",
+            vec!["religious".into(), "nudes".into(), "death".into()],
+        );
+        println!(
+            "narrowest: {:?}",
+            fetch("2026-01-01", 0, &nothing.unwrap()).map(|f| f.0["pool"].clone())
+        );
     }
 
     #[test]
