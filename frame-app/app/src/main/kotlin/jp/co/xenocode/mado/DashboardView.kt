@@ -280,21 +280,27 @@ class DashboardView(context: Context) : View(context) {
         val middle = x - 8f + (bounds.left + bounds.right) / 2f
         canvas.drawText("${weekday.format(now)} · ${dayMonth.format(now)}".uppercase(), middle, 252f, mono(art.paper, 0.72f, 16f, Paint.Align.CENTER))
         rule(canvas, x, right, 290f)
+        var sectionEnd = 290f
         weather?.let {
             canvas.drawText(fit(it.sentence + ".", type(34f, italic, art.paper), right - x), x, 346f, text)
             canvas.drawText(fit(it.detail, type(17f, sans, art.paper, 0.72f), right - x), x, 378f, text)
             rule(canvas, x, right, 402f)
+            sectionEnd = 402f
             // As many other places as fit above the projects; always at least one.
             val room = ((736f - projects.size * 62f - 30f - 34f - 431f) / AWAY_STEP).toInt() + 1
             val shown = away.take(room.coerceIn(1, 4))
             shown.forEachIndexed { i, place ->
                 drawAway(canvas, place, x, 431f + i * AWAY_STEP, 17f, art.paper, 0.72f, Paint.Align.LEFT, false, right - x, spread = true)
             }
-            if (shown.isNotEmpty()) rule(canvas, x, right, 448f + (shown.size - 1) * AWAY_STEP)
+            if (shown.isNotEmpty()) {
+                sectionEnd = 448f + (shown.size - 1) * AWAY_STEP
+                rule(canvas, x, right, sectionEnd)
+            }
         }
 
         val top = 736f - projects.size * 62f
-        if (projects.isNotEmpty()) canvas.drawText("IN THE STUDIO", x, top - 30f, mono(art.paper, 0.55f, 14f))
+        // With four projects and other places above, there is no room left for the heading.
+        if (projects.isNotEmpty() && top - 30f - sectionEnd >= 34f) canvas.drawText("IN THE STUDIO", x, top - 30f, mono(art.paper, 0.55f, 14f))
         var y = top
         for (p in projects) {
             drawMark(canvas, p.status, x + 7f, y + 13f)

@@ -83,7 +83,10 @@ pub fn want(hub: Shared, day: String, another: bool) {
         hub.art_busy.store(false, std::sync::atomic::Ordering::SeqCst);
         match found {
             Ok(Ok(art)) => {
-                hub.log(format!("art of the day: {}", art.meta["title"].as_str().unwrap_or("untitled")));
+                hub.log(format!(
+                    "art of the day: {}",
+                    art.meta["title"].as_str().unwrap_or("untitled")
+                ));
                 let art = Arc::new(art);
                 hub.send_all(&art.message());
                 *hub.art.lock().unwrap() = Some(art);
@@ -119,7 +122,14 @@ fn load_or_fetch(hub: &Shared, day: &str, salt: u64, another: bool) -> Result<Da
         }
     };
     let qr = qr_png(meta["url"].as_str().unwrap_or("https://www.artic.edu"))?;
-    Ok(Daily { version: hub.id(), day: day.to_owned(), salt, meta, image: image.into(), qr: qr.into() })
+    Ok(Daily {
+        version: hub.id(),
+        day: day.to_owned(),
+        salt,
+        meta,
+        image: image.into(),
+        qr: qr.into(),
+    })
 }
 
 fn fetch(day: &str, salt: u64) -> Result<(Value, Vec<u8>), String> {
@@ -164,12 +174,25 @@ fn fetch(day: &str, salt: u64) -> Result<(Value, Vec<u8>), String> {
         .read_to_end(&mut original)
         .map_err(|e| format!("museum image: {e}"))?;
     let img = image::load_from_memory(&original).map_err(|e| format!("museum image: {e}"))?;
-    let img = if img.width().max(img.height()) > 1280 { img.resize(1280, 1280, FilterType::CatmullRom) } else { img };
+    let img = if img.width().max(img.height()) > 1280 {
+        img.resize(1280, 1280, FilterType::CatmullRom)
+    } else {
+        img
+    };
     let mut jpeg = Vec::new();
-    JpegEncoder::new_with_quality(&mut jpeg, 88).encode_image(&img.to_rgb8()).map_err(|e| e.to_string())?;
+    JpegEncoder::new_with_quality(&mut jpeg, 88)
+        .encode_image(&img.to_rgb8())
+        .map_err(|e| e.to_string())?;
 
-    let text = work["short_description"].as_str().or(work["description"].as_str()).unwrap_or("");
-    let id = work["id"].as_u64().map(|n| n.to_string()).or(work["id"].as_str().map(str::to_owned)).unwrap_or_default();
+    let text = work["short_description"]
+        .as_str()
+        .or(work["description"].as_str())
+        .unwrap_or("");
+    let id = work["id"]
+        .as_u64()
+        .map(|n| n.to_string())
+        .or(work["id"].as_str().map(str::to_owned))
+        .unwrap_or_default();
     let meta = json!({
         "title": work["title"].as_str().unwrap_or("Untitled"),
         // The museum follows the artist's name with nationality and dates, on a new line or in brackets.
@@ -200,7 +223,12 @@ fn plain_text(html: &str) -> String {
             _ => {}
         }
     }
-    out.replace("&amp;", "&").replace("&nbsp;", " ").replace("&quot;", "\"").split_whitespace().collect::<Vec<_>>().join(" ")
+    out.replace("&amp;", "&")
+        .replace("&nbsp;", " ")
+        .replace("&quot;", "\"")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Whole sentences up to about TEXT_CHARS, so the frame never shows a cut-off thought.
@@ -224,11 +252,19 @@ fn lum(c: Rgb) -> f32 {
 fn saturation(c: Rgb) -> f32 {
     let max = c[0].max(c[1]).max(c[2]);
     let min = c[0].min(c[1]).min(c[2]);
-    if max <= 0.0 { 0.0 } else { (max - min) / max }
+    if max <= 0.0 {
+        0.0
+    } else {
+        (max - min) / max
+    }
 }
 
 fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
 }
 
 /// Move a colour to a target lightness by mixing toward black or white, keeping its hue.
@@ -242,7 +278,12 @@ fn at_lum(c: Rgb, target: f32) -> Rgb {
 }
 
 fn hex(c: Rgb) -> String {
-    format!("#{:02x}{:02x}{:02x}", c[0].round() as u8, c[1].round() as u8, c[2].round() as u8)
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        c[0].round() as u8,
+        c[1].round() as u8,
+        c[2].round() as u8
+    )
 }
 
 /// Five swatches by k-means, most common first, plus the colours the layouts need:
@@ -250,7 +291,10 @@ fn hex(c: Rgb) -> String {
 fn palette(img: &DynamicImage) -> Value {
     const K: usize = 5;
     let small = img.resize_exact(48, 48, FilterType::Triangle).to_rgb8();
-    let mut px: Vec<Rgb> = small.pixels().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
+    let mut px: Vec<Rgb> = small
+        .pixels()
+        .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])
+        .collect();
     px.sort_by(|a, b| lum(*a).total_cmp(&lum(*b)));
     let mut centers: Vec<Rgb> = (0..K).map(|i| px[px.len() * (2 * i + 1) / (2 * K)]).collect();
     let mut counts = [0usize; K];
@@ -268,7 +312,11 @@ fn palette(img: &DynamicImage) -> Value {
         }
         for k in 0..K {
             if counts[k] > 0 {
-                centers[k] = [sums[k][0] / counts[k] as f32, sums[k][1] / counts[k] as f32, sums[k][2] / counts[k] as f32];
+                centers[k] = [
+                    sums[k][0] / counts[k] as f32,
+                    sums[k][1] / counts[k] as f32,
+                    sums[k][2] / counts[k] as f32,
+                ];
             }
         }
     }
@@ -276,7 +324,10 @@ fn palette(img: &DynamicImage) -> Value {
     order.sort_by(|&a, &b| counts[b].cmp(&counts[a]));
     let swatches: Vec<Rgb> = order.iter().map(|&k| centers[k]).collect();
 
-    let vivid = *swatches.iter().max_by(|a, b| (saturation(**a) * (0.3 + lum(**a))).total_cmp(&(saturation(**b) * (0.3 + lum(**b))))).unwrap();
+    let vivid = *swatches
+        .iter()
+        .max_by(|a, b| (saturation(**a) * (0.3 + lum(**a))).total_cmp(&(saturation(**b) * (0.3 + lum(**b)))))
+        .unwrap();
     let darkest = *swatches.iter().min_by(|a, b| lum(**a).total_cmp(&lum(**b))).unwrap();
     let lightest = *swatches.iter().max_by(|a, b| lum(**a).total_cmp(&lum(**b))).unwrap();
     json!({
@@ -306,7 +357,8 @@ fn qr_png(url: &str) -> Result<Vec<u8>, String> {
         Luma([if dark { 0 } else { 255 }])
     });
     let mut png = Vec::new();
-    img.write_to(&mut Cursor::new(&mut png), ImageFormat::Png).map_err(|e| e.to_string())?;
+    img.write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+        .map_err(|e| e.to_string())?;
     Ok(png)
 }
 
@@ -318,7 +370,80 @@ pub async fn file(State(hub): State<Shared>, Path((version, file)): Path<(u64, S
         _ => None,
     });
     match found {
-        Some((mime, bytes)) => ([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "max-age=31536000, immutable")], bytes).into_response(),
+        Some((mime, bytes)) => (
+            [
+                (header::CONTENT_TYPE, mime),
+                (header::CACHE_CONTROL, "max-age=31536000, immutable"),
+            ],
+            bytes,
+        )
+            .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_text_strips_markup_and_entities() {
+        assert_eq!(
+            plain_text("<p>Oil &amp; tempera,<br>on <em>panel</em>.</p>"),
+            "Oil & tempera, on panel ."
+        );
+    }
+
+    #[test]
+    fn excerpt_keeps_whole_sentences() {
+        let long = "One sentence here. ".repeat(40);
+        let cut = excerpt(&long);
+        assert!(cut.chars().count() <= TEXT_CHARS);
+        assert!(cut.ends_with("here."));
+        assert_eq!(excerpt("Short."), "Short.");
+    }
+
+    #[test]
+    fn excerpt_keeps_a_single_overlong_sentence() {
+        let long = "word ".repeat(200);
+        assert_eq!(excerpt(&long), long.trim());
+    }
+
+    #[test]
+    fn at_lum_reaches_the_target_from_either_side() {
+        for colour in [[200.0, 40.0, 40.0], [10.0, 20.0, 60.0], [128.0, 128.0, 128.0]] {
+            for target in [0.07, 0.17, 0.58, 0.9] {
+                assert!((lum(at_lum(colour, target)) - target).abs() < 0.01);
+            }
+        }
+    }
+
+    #[test]
+    fn palette_has_five_swatches_and_readable_grounds() {
+        let img = DynamicImage::ImageRgb8(image::RgbImage::from_fn(64, 64, |x, y| {
+            image::Rgb([(x * 4) as u8, (y * 4) as u8, 120])
+        }));
+        let p = palette(&img);
+        assert_eq!(p["swatches"].as_array().unwrap().len(), 5);
+        let parse = |name: &str| {
+            let hex = p[name].as_str().unwrap();
+            let n = u32::from_str_radix(&hex[1..], 16).unwrap();
+            lum([(n >> 16) as f32, (n >> 8 & 255) as f32, (n & 255) as f32])
+        };
+        assert!(parse("ink") < 0.12 && parse("wall") < 0.25);
+        assert!(parse("paper") > 0.85 && parse("accent") > 0.5);
+    }
+
+    #[test]
+    fn qr_is_a_png() {
+        let png = qr_png("https://www.artic.edu/artworks/1").unwrap();
+        assert_eq!(&png[1..4], b"PNG");
+    }
+
+    #[test]
+    fn only_dates_are_accepted_as_days() {
+        assert!(valid_day("2026-10-12"));
+        assert!(!valid_day("../../etc/passwd"));
+        assert!(!valid_day("2026-10-1"));
     }
 }

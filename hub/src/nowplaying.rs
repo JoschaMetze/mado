@@ -109,8 +109,15 @@ pub async fn post(State(hub): State<Shared>, Json(input): Json<Input>) -> Respon
         let error = format!("state must be one of {}", STATES.join(", "));
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response();
     }
-    let prepared = match input.art_b64.as_deref().map(|b| base64::engine::general_purpose::STANDARD.decode(b)) {
-        Some(Ok(bytes)) => tokio::task::spawn_blocking(move || prepare_art(&bytes)).await.ok().flatten(),
+    let prepared = match input
+        .art_b64
+        .as_deref()
+        .map(|b| base64::engine::general_purpose::STANDARD.decode(b))
+    {
+        Some(Ok(bytes)) => tokio::task::spawn_blocking(move || prepare_art(&bytes))
+            .await
+            .ok()
+            .flatten(),
         _ => None,
     };
 
@@ -127,14 +134,23 @@ pub async fn post(State(hub): State<Shared>, Json(input): Json<Input>) -> Respon
         p.at = Instant::now();
         let track = p.track();
         if let Some((cover, backdrop)) = prepared {
-            p.art = Some(Art { version: hub.id(), track: track.clone(), cover, backdrop });
+            p.art = Some(Art {
+                version: hub.id(),
+                track: track.clone(),
+                cover,
+                backdrop,
+            });
         } else if p.art.as_ref().is_some_and(|a| a.track != track) {
             p.art = None;
         }
         (p.message(), p.art.is_some(), track != before && !p.title.is_empty())
     };
     if new_track {
-        hub.log(format!("now playing: {} · {}", msg["title"].as_str().unwrap_or(""), msg["artist"].as_str().unwrap_or("")));
+        hub.log(format!(
+            "now playing: {} · {}",
+            msg["title"].as_str().unwrap_or(""),
+            msg["artist"].as_str().unwrap_or("")
+        ));
     }
     hub.send_all(&msg);
     Json(json!({ "have_art": have_art })).into_response()
@@ -146,7 +162,9 @@ fn prepare_art(bytes: &[u8]) -> Option<(Bytes, Bytes)> {
     let img = image::load_from_memory(bytes).ok()?;
     let mut cover = Vec::new();
     let square = img.resize_to_fill(800, 800, FilterType::CatmullRom).to_rgb8();
-    JpegEncoder::new_with_quality(&mut cover, 88).encode_image(&square).ok()?;
+    JpegEncoder::new_with_quality(&mut cover, 88)
+        .encode_image(&square)
+        .ok()?;
     let mut backdrop = Vec::new();
     img.resize_to_fill(160, 100, FilterType::Triangle)
         .blur(7.0)
@@ -158,13 +176,24 @@ fn prepare_art(bytes: &[u8]) -> Option<(Bytes, Bytes)> {
 
 pub async fn art(State(hub): State<Shared>, Path((version, file)): Path<(u64, String)>) -> Response {
     let p = hub.now_playing.lock().unwrap();
-    let found = p.art.as_ref().filter(|a| a.version == version).and_then(|a| match file.as_str() {
-        "cover.jpg" => Some(("image/jpeg", a.cover.clone())),
-        "backdrop.png" => Some(("image/png", a.backdrop.clone())),
-        _ => None,
-    });
+    let found = p
+        .art
+        .as_ref()
+        .filter(|a| a.version == version)
+        .and_then(|a| match file.as_str() {
+            "cover.jpg" => Some(("image/jpeg", a.cover.clone())),
+            "backdrop.png" => Some(("image/png", a.backdrop.clone())),
+            _ => None,
+        });
     match found {
-        Some((mime, bytes)) => ([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "max-age=31536000, immutable")], bytes).into_response(),
+        Some((mime, bytes)) => (
+            [
+                (header::CONTENT_TYPE, mime),
+                (header::CACHE_CONTROL, "max-age=31536000, immutable"),
+            ],
+            bytes,
+        )
+            .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }

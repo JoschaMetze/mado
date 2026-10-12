@@ -45,7 +45,10 @@ code{font:.85em ui-monospace,Menlo,monospace;background:var(--bg);padding:.15em 
 "#;
 
 fn esc(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn ago(secs: u64) -> String {
@@ -77,9 +80,17 @@ fn find_cities(name: &str) -> Result<Vec<Value>, String> {
 }
 
 pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search): Query<Search>) -> Html<String> {
-    let host = headers.get(HOST).and_then(|h| h.to_str().ok()).unwrap_or("HUB_ADDRESS:7878");
+    let host = headers
+        .get(HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("HUB_ADDRESS:7878");
 
-    let city = search.city.as_deref().map(str::trim).filter(|c| !c.is_empty()).map(str::to_owned);
+    let city = search
+        .city
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .map(str::to_owned);
     let matches = match city.clone() {
         None => String::new(),
         Some(name) => match tokio::task::spawn_blocking(move || find_cities(&name)).await {
@@ -128,7 +139,8 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
     let glass = if frames.is_empty() {
         r#"<div class="glass"></div>"#.to_owned()
     } else {
-        r#"<img class="glass" src="/api/look" alt="What the frame is showing now"><p><a href="/">Refresh</a></p>"#.to_owned()
+        r#"<img class="glass" src="/api/look" alt="What the frame is showing now"><p><a href="/">Refresh</a></p>"#
+            .to_owned()
     };
     drop(frames);
 
@@ -149,7 +161,11 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
             )
         })
         .collect();
-    let places = if places.is_empty() { r#"<li class="muted">No places yet.</li>"#.to_owned() } else { places };
+    let places = if places.is_empty() {
+        r#"<li class="muted">No places yet.</li>"#.to_owned()
+    } else {
+        places
+    };
 
     let painting = match hub.art.lock().unwrap().as_ref() {
         Some(a) => format!(
@@ -178,14 +194,24 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
             )
         })
         .collect();
-    let project_rows = if project_rows.is_empty() { r#"<li class="muted">No projects yet. Agents add them with frame_project.</li>"#.to_owned() } else { project_rows };
+    let project_rows = if project_rows.is_empty() {
+        r#"<li class="muted">No projects yet. Agents add them with frame_project.</li>"#.to_owned()
+    } else {
+        project_rows
+    };
 
     let log: String = hub
         .log
         .lock()
         .unwrap()
         .iter()
-        .map(|e| format!("<li><span>{}</span>{}</li>", ago(e.at.elapsed().as_secs()), esc(&e.line)))
+        .map(|e| {
+            format!(
+                "<li><span>{}</span>{}</li>",
+                ago(e.at.elapsed().as_secs()),
+                esc(&e.line)
+            )
+        })
         .collect();
 
     Html(format!(
@@ -262,7 +288,12 @@ pub struct ProjectForm {
 }
 
 pub async fn project(State(hub): State<Shared>, Form(f): Form<ProjectForm>) -> Redirect {
-    let update = projects::Update { name: f.name, status: f.status, note: f.note, progress: None };
+    let update = projects::Update {
+        name: f.name,
+        status: f.status,
+        note: f.note,
+        progress: None,
+    };
     if let Err(e) = hub.update_project(update) {
         hub.log(format!("project not saved: {e}"));
     }
@@ -278,10 +309,15 @@ pub async fn art_another(State(hub): State<Shared>) -> Redirect {
 }
 
 pub async fn place_add(State(hub): State<Shared>, Form(place): Form<Place>) -> Redirect {
-    let valid = !place.name.trim().is_empty() && (-90.0..=90.0).contains(&place.lat) && (-180.0..=180.0).contains(&place.lon);
+    let valid =
+        !place.name.trim().is_empty() && (-90.0..=90.0).contains(&place.lat) && (-180.0..=180.0).contains(&place.lon);
     if valid {
         let timezone = place.timezone.filter(|tz| !tz.is_empty());
-        hub.config.write().unwrap().places.push(Place { name: place.name.trim().to_owned(), timezone, ..place });
+        hub.config.write().unwrap().places.push(Place {
+            name: place.name.trim().to_owned(),
+            timezone,
+            ..place
+        });
         save(&hub);
     }
     Redirect::to("/")
@@ -302,7 +338,14 @@ pub struct Rename {
 pub async fn place_rename(State(hub): State<Shared>, Form(r): Form<Rename>) -> Redirect {
     let name: String = r.name.trim().chars().take(40).collect();
     let renamed = !name.is_empty()
-        && hub.config.write().unwrap().places.get_mut(r.index).map(|place| place.name = name).is_some();
+        && hub
+            .config
+            .write()
+            .unwrap()
+            .places
+            .get_mut(r.index)
+            .map(|place| place.name = name)
+            .is_some();
     if renamed {
         save(&hub);
     }

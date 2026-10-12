@@ -132,7 +132,10 @@ impl Hub {
         if log.len() == LOG_LINES {
             log.pop_back();
         }
-        log.push_front(LogEntry { at: Instant::now(), line });
+        log.push_front(LogEntry {
+            at: Instant::now(),
+            line,
+        });
     }
 
     /// Persist the config and push it to every connected frame.
@@ -248,14 +251,19 @@ impl Hub {
                     self.commands.send_modify(|c| *c = (c.0 + 1, action.to_owned()));
                 }
             }
-            Some("event") => self.log(format!("frame #{id}: {} {}", msg["kind"].as_str().unwrap_or("event"), msg["id"])),
+            Some("event") => self.log(format!(
+                "frame #{id}: {} {}",
+                msg["kind"].as_str().unwrap_or("event"),
+                msg["id"]
+            )),
             _ => {}
         }
     }
 }
 
 async fn frame_ws(ws: WebSocketUpgrade, State(hub): State<Shared>) -> Response {
-    ws.max_message_size(8 << 20).on_upgrade(move |socket| frame_session(socket, hub))
+    ws.max_message_size(8 << 20)
+        .on_upgrade(move |socket| frame_session(socket, hub))
 }
 
 async fn frame_session(socket: WebSocket, hub: Shared) {
@@ -265,7 +273,14 @@ async fn frame_session(socket: WebSocket, hub: Shared) {
     let _ = tx.send(json!({ "t": "config", "config": *hub.config.read().unwrap() }).to_string());
     let _ = tx.send(hub.now_playing.lock().unwrap().message().to_string());
     let _ = tx.send(hub.projects_message().to_string());
-    hub.frames.lock().unwrap().insert(id, FrameConn { tx, hello: Value::Null, since: Instant::now() });
+    hub.frames.lock().unwrap().insert(
+        id,
+        FrameConn {
+            tx,
+            hello: Value::Null,
+            since: Instant::now(),
+        },
+    );
     hub.log(format!("frame #{id} connected"));
 
     let writer = tokio::spawn(async move {
@@ -310,7 +325,14 @@ async fn api_state(State(hub): State<Shared>) -> Json<Value> {
 
 async fn api_look(State(hub): State<Shared>) -> Response {
     match hub.look().await {
-        Ok(jpeg) => ([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "no-store")], jpeg).into_response(),
+        Ok(jpeg) => (
+            [
+                (header::CONTENT_TYPE, "image/jpeg"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            jpeg,
+        )
+            .into_response(),
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, e).into_response(),
     }
 }
@@ -333,7 +355,10 @@ async fn main() {
         .route("/api/notify", post(api_notify))
         .route("/api/state", get(api_state))
         .route("/api/look", get(api_look))
-        .route("/api/now_playing", post(nowplaying::post).layer(DefaultBodyLimit::max(12 << 20)))
+        .route(
+            "/api/now_playing",
+            post(nowplaying::post).layer(DefaultBodyLimit::max(12 << 20)),
+        )
         .route("/api/now_playing/commands", get(nowplaying::commands))
         .route("/art/{version}/{file}", get(nowplaying::art))
         .route("/api/project", post(projects::post))
@@ -353,4 +378,66 @@ async fn main() {
         })
         .await
         .unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hub() -> Hub {
+        Hub::load(std::env::temp_dir().join(format!("mado-test-{}", std::process::id())))
+    }
+
+    fn alert(text: &str, level: Option<&str>) -> Notify {
+        Notify {
+            text: text.into(),
+            level: level.map(str::to_owned),
+            source: None,
+            ttl_s: None,
+        }
+    }
+
+    #[test]
+    fn alerts_are_validated_before_anything_is_sent() {
+        let hub = hub();
+        assert!(hub.notify(alert("  ", None)).unwrap_err().contains("empty"));
+        assert!(hub.notify(alert(&"x".repeat(281), None)).unwrap_err().contains("280"));
+        assert!(hub.notify(alert("hi", Some("shout"))).unwrap_err().contains("level"));
+    }
+
+    #[test]
+    fn a_valid_alert_with_no_frame_says_so() {
+        assert!(hub()
+            .notify(alert("hi", Some("urgent")))
+            .unwrap_err()
+            .contains("no frame"));
+    }
+
+    #[test]
+    fn projects_are_listed_with_what_needs_the_owner_first() {
+        let hub = hub();
+        let update = |name: &str, status: &str| projects::Update {
+            name: name.into(),
+            status: status.into(),
+            note: String::new(),
+            progress: Some(7.0),
+        };
+        hub.update_project(update("b", "on_track")).unwrap();
+        hub.update_project(update("a", "done")).unwrap();
+        hub.update_project(update("c", "needs_you")).unwrap();
+        let items = hub.projects_message()["items"].take();
+        let names: Vec<&str> = items
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["c", "b", "a"]);
+        assert_eq!(items[0]["progress"], 1.0);
+
+        hub.update_project(update("C", "archived")).unwrap();
+        assert_eq!(hub.projects_message()["items"].as_array().unwrap().len(), 2);
+        assert!(hub.update_project(update("b", "paused")).is_err());
+        let _ = std::fs::remove_dir_all(&hub.data_dir);
+    }
 }

@@ -4,30 +4,37 @@ Mado (窓, "window") turns an old Android photo frame into a display your other 
 agents can send things to. It is not a browser kiosk: the frame runs a small native app, so
 it stays smooth on very modest hardware.
 
-What works today:
+![The dashboard: a painting of the day with the time, weather and projects](docs/images/full-bleed.jpg)
+
+## What it does
 
 - **A dashboard that is a painting.** Each day the hub picks a public-domain painting from
-  the Art Institute of Chicago. The frame shows it with the time and your projects in one of
-  four layouts, all coloured from the painting itself. Tap the label to read about it and
-  get a QR code for the museum's page; tap elsewhere for the next layout.
-- **Weather in a sentence.** "Rain easing by three", with the temperature and sunset. The
-  frame fetches the forecast itself (Open-Meteo), so it keeps working when the hub is down.
-  A second place (family elsewhere, say) gets its own line with its local time. Places are
-  found by city name in the hub's web interface.
-- **Project status.** Agents report where a project stands (`frame_project`) and the
+  the Art Institute of Chicago. The frame shows it with the time, the weather and your
+  projects in one of four layouts, all coloured from the painting itself. Tap the label to
+  read about it and get a QR code for the museum's page; tap elsewhere for the next layout.
+- **Weather in a sentence.** "Rain easing by three", with the temperature and sunset. Other
+  places you care about get a line each, with their local time. The frame fetches forecasts
+  itself, so weather keeps working when the hub is down.
+- **Project status from your agents.** An agent reports where a project stands and the
   dashboard keeps the latest word on each.
-- **Now playing.** The album cover of whatever Apple Music is playing on your Mac, with a
-  backdrop made from the cover. Tap the cover to fill the screen with it; tap the text to
-  play or pause.
-- **Liquid alerts.** Anything on your network can put a message on the glass at one of three
-  levels: a *whisper* (a bead at the edge), a *nudge* (one line that leaves by itself) or
-  *urgent* (stays until dismissed).
-- **MCP.** Agents get `frame_notify`, `frame_project`, `frame_look` (a screenshot of the
-  frame) and `frame_state`.
-- **The rail.** Tap or swipe the left edge of the frame for scenes, brightness and the way
-  back to the launcher.
+- **Liquid alerts.** Anything on your network can put a message on the glass: a *whisper*
+  (a bead at the edge), a *nudge* (one line that drains away) or *urgent* (stays until
+  someone taps it).
+- **Now playing.** The cover of whatever Apple Music is playing on your Mac takes over the
+  screen while music plays. Tap the cover to fill the screen with it; tap the text to play or
+  pause.
+- **MCP and HTTP.** Agents get tools; scripts get plain endpoints.
+- **The rail.** Tap or swipe the left edge for scenes, brightness and the way back to the
+  launcher.
 
-Planned: Tama (a small on-screen companion), agent canvases, night mode.
+| | |
+|---|---|
+| ![Editorial split layout](docs/images/split.jpg) | ![Pigments layout](docs/images/pigments.jpg) |
+| ![Learn more about the painting](docs/images/learn-more.jpg) | ![A nudge](docs/images/nudge.jpg) |
+
+![An urgent alert](docs/images/urgent.jpg)
+
+Planned: Tama (a small on-screen companion), canvases that agents can draw on, night mode.
 
 ## How it fits together
 
@@ -41,47 +48,54 @@ Planned: Tama (a small on-screen companion), agent canvases, night mode.
 
 | Folder | What it is |
 |---|---|
-| `hub/` | `mado-hub`, the brain. Rust. Serves the frame's WebSocket, an HTTP API, MCP, and a web interface where all configuration lives. Runs on a home server or on a Mac. |
+| `hub/` | `mado-hub`, the brain. Rust. Serves the frame's WebSocket, an HTTP API, MCP, and a web page where all configuration lives. Runs on a home server (Docker or not) or on a Mac. |
 | `frame-app/` | The Android app that draws everything. Kotlin, plain Canvas views, `minSdk 23`. |
 | `nowplaying/` | `mado-nowplaying`, a macOS helper that reports Apple Music to the hub. Rust. |
 
 The frame holds no secrets and listens on no ports: it opens one outbound connection to the
 hub and draws what it is told. Its clock and weather keep working when the hub is down.
 
-## Running it
+## Setting it up
 
-**1. The hub**, on any machine the frame can reach:
+**With an agent:** point your coding agent at
+[docs/agent-setup.md](docs/agent-setup.md). It covers checking the device, building,
+installing, starting at power-on and wiring up MCP, and it says what the agent must ask you
+before doing.
 
-```sh
-cd hub
-cargo run --release
-```
+**By hand**, the short version:
 
-It listens on `0.0.0.0:7878` (`MADO_BIND` to change) and keeps its config in `./data`
-(`MADO_DATA`). Open `http://HOST:7878/` for the web interface.
+1. **The hub**, on any machine the frame can reach:
 
-**2. The frame app.** With the frame connected over USB and `adb` working:
+   ```sh
+   docker compose up -d --build        # or: cd hub && cargo run --release
+   ```
 
-```sh
-cd frame-app
-./run.sh ws://HOST:7878/frame
-```
+   It listens on port 7878 (`MADO_BIND`) and keeps its settings in `./data` (`MADO_DATA`).
+   Open `http://HOST:7878/` for the web page.
 
-The hub address is remembered; later runs need no argument. Put machine-specific setup such
-as `JAVA_HOME` or `ANDROID_SERIAL` in `frame-app/env.local.sh`.
+2. **The frame app.** With the frame connected over USB and `adb` working:
 
-**3. Now playing**, on the Mac with the music:
+   ```sh
+   cd frame-app && ./run.sh ws://HOST:7878/frame
+   ```
 
-```sh
-cd nowplaying
-cargo run --release -- http://HOST:7878
-```
+   The hub address is remembered. Put machine-specific setup such as `JAVA_HOME` or
+   `ANDROID_SERIAL` in `frame-app/env.local.sh`.
 
-macOS asks once for permission to control Music. The helper never launches Music.
+3. **Now playing** (optional), on the Mac with the music:
+
+   ```sh
+   cd nowplaying && cargo run --release -- http://HOST:7878
+   ```
+
+   macOS asks once for permission to control Music. The helper never launches Music.
+
+You need `adb` access to the frame. For most photo frames that means rooting it first, which
+depends on the device and is not covered here.
 
 ## Talking to the hub
 
-Send an alert:
+The hub speaks both plain HTTP and MCP; they do the same things.
 
 ```sh
 curl -X POST http://HOST:7878/api/notify \
@@ -89,29 +103,54 @@ curl -X POST http://HOST:7878/api/notify \
   -d '{"text": "Backup finished", "level": "nudge", "source": "nas"}'
 ```
 
-| Endpoint | |
+| HTTP | |
 |---|---|
 | `POST /api/notify` | `text`, optional `level` (`whisper`, `nudge`, `urgent`), `source`, `ttl_s` (urgent ignores it and stays until tapped) |
-| `GET /api/look` | JPEG of what the frame is showing |
-| `GET /api/state` | Connected frames, now playing, config, recent activity |
 | `POST /api/project` | `name`, `status` (`on_track`, `needs_you`, `blocked`, `done`, `archived`), optional `note`, `progress` 0 to 1 |
+| `GET /api/look` | JPEG of what the frame is showing |
+| `GET /api/state` | Connected frames, now playing, today's painting, projects, config, recent activity |
 | `POST /api/now_playing` | What a player is doing; see `nowplaying/src/main.rs` for the shape. A helper for another player (Spotify, say) posts the same JSON. |
-| `POST /mcp` | MCP over streamable HTTP |
 
-For an MCP client, add `http://HOST:7878/mcp` as a remote server.
+| MCP tool | |
+|---|---|
+| `frame_notify` | Show an alert |
+| `frame_project` | Report where a project stands |
+| `frame_look` | Get a picture of the frame's screen, so an agent can see its own work |
+| `frame_state` | The same as `GET /api/state` |
+
+The MCP endpoint is `http://HOST:7878/mcp` (streamable HTTP). For Claude Code:
+
+```sh
+claude mcp add --transport http mado http://HOST:7878/mcp
+```
 
 ## Security
 
-The hub has no authentication yet. Run it where only your own devices can reach it, for
-example bound to a [Tailscale](https://tailscale.com) address, and do not expose it to the
-internet. The frame itself does not need to be on the tailnet; it only needs to reach the hub.
+The hub has no authentication. Run it where only your own devices can reach it, for example
+bound to a [Tailscale](https://tailscale.com) address, and never expose it to the internet.
+The frame does not need to be on the tailnet; it only needs to reach the hub.
 
 ## Hardware
 
-Developed on a Uhale 102KZ: Rockchip RK3126, Mali-400 (OpenGL ES 2.0), 1 GB RAM, Android
-6.0.1, 1280×800. The app targets that class of device: no Compose, no large frameworks,
-artwork is resized and blurred on the hub so the frame only has to draw it. Layouts currently
-assume a 1280×800 landscape screen.
+Developed on a Uhale 102KZ: Rockchip RK3126, Mali-400, 1 GB RAM, Android 6.0.1, 1280×800.
+The app targets that class of device: no Compose, no large frameworks, and images are
+resized on the hub so the frame only has to draw them. Layouts currently assume a 1280×800
+landscape screen.
 
-The app must be installable on the frame, which for most photo frames means getting `adb`
-access first. How to do that depends on the device and is not covered here.
+## Development
+
+```sh
+cd hub && cargo test                          # hub
+cd frame-app && ./gradlew testDebugUnitTest   # forecast wording
+```
+
+`cargo fmt` and `cargo clippy` are expected to be clean. See [CHANGELOG.md](CHANGELOG.md)
+for what changed.
+
+## Credits
+
+Paintings and their descriptions come from the
+[Art Institute of Chicago's public API](https://api.artic.edu/docs/); only works it marks as
+public domain are used. Forecasts and city search come from
+[Open-Meteo](https://open-meteo.com). Album artwork that Music does not have locally is
+looked up in the iTunes catalogue.

@@ -160,7 +160,8 @@ object Forecast {
         val rain = (hour + 1..end).firstOrNull { wet(codes[it]) && chance.getOrElse(it) { 100 } >= 40 }
         if (rain != null) {
             return when {
-                rain < 24 -> "${noun(codes[rain])} from ${hourWord(rain)}"
+                rain <= 24 -> "${noun(codes[rain])} from ${hourWord(rain)}"
+                rain % 24 < 6 -> "${noun(codes[rain])} overnight"
                 rain % 24 < 9 -> "${noun(codes[rain])} by morning"
                 else -> "${noun(codes[rain])} tomorrow"
             }

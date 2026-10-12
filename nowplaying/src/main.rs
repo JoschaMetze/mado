@@ -68,8 +68,15 @@ impl Track {
 }
 
 fn osascript(script: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new("osascript").arg("-e").arg(script).args(args).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim_end_matches('\n').to_owned())
+    let out = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .args(args)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim_end_matches('\n').to_owned())
 }
 
 /// None when Music is closed, stopped, or will not say.
@@ -149,7 +156,10 @@ fn follow_commands(hub: String) {
                     Some("previous") => "previous track",
                     _ => continue,
                 };
-                osascript(&format!(r#"if application "Music" is running then tell application "Music" to {verb}"#), &[]);
+                osascript(
+                    &format!(r#"if application "Music" is running then tell application "Music" to {verb}"#),
+                    &[],
+                );
             }
             None => {
                 // Hub unreachable. Start over from its current seq so an old tap is not replayed.
@@ -203,13 +213,21 @@ fn main() {
         let position_s = track.as_ref().map_or(0.0, |t| t.position_s);
 
         if key != art_key {
-            art = track.as_ref().and_then(artwork).map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
+            art = track
+                .as_ref()
+                .and_then(artwork)
+                .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
             send_art = art.is_some();
             art_key = key.clone();
         }
 
         let due = sent.as_ref().is_none_or(|s| {
-            let expected = s.position_s + if s.state == "playing" { s.at.elapsed().as_secs_f64() } else { 0.0 };
+            let expected = s.position_s
+                + if s.state == "playing" {
+                    s.at.elapsed().as_secs_f64()
+                } else {
+                    0.0
+                };
             s.state != state || s.key != key || s.at.elapsed() >= HEARTBEAT || (position_s - expected).abs() > SCRUB_S
         });
         if due || send_art {
@@ -233,7 +251,12 @@ fn main() {
                     // A restarted hub has lost the cover; hand it over again next round. If it
                     // was in this very request, the hub could not read it and never will.
                     send_art = !send_art && art.is_some() && reply["have_art"] == false;
-                    sent = Some(Sent { state, key, position_s, at: Instant::now() });
+                    sent = Some(Sent {
+                        state,
+                        key,
+                        position_s,
+                        at: Instant::now(),
+                    });
                     if !reachable {
                         println!("mado-nowplaying: hub is back");
                     }

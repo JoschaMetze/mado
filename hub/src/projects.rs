@@ -77,11 +77,22 @@ impl Hub {
                 (None, false) => projects.push(project),
             }
             let _ = std::fs::create_dir_all(&self.data_dir);
-            if let Err(e) = std::fs::write(self.data_dir.join("projects.json"), serde_json::to_vec_pretty(&*projects).unwrap()) {
+            if let Err(e) = std::fs::write(
+                self.data_dir.join("projects.json"),
+                serde_json::to_vec_pretty(&*projects).unwrap(),
+            ) {
                 self.log(format!("could not save projects: {e}"));
             }
         }
-        self.log(format!("project {name}: {}{}", u.status.replace('_', " "), if note.is_empty() { String::new() } else { format!(" · {note}") }));
+        self.log(format!(
+            "project {name}: {}{}",
+            u.status.replace('_', " "),
+            if note.is_empty() {
+                String::new()
+            } else {
+                format!(" · {note}")
+            }
+        ));
         let frames = self.send_all(&self.projects_message());
         Ok(json!({ "name": name, "status": u.status, "shown_on_frames": frames }))
     }

@@ -20,7 +20,11 @@ pub async fn handle(State(hub): State<Shared>, Json(body): Json<Value>) -> Respo
             for msg in batch {
                 out.extend(rpc(&hub, msg).await);
             }
-            if out.is_empty() { None } else { Some(Value::Array(out)) }
+            if out.is_empty() {
+                None
+            } else {
+                Some(Value::Array(out))
+            }
         }
         msg => rpc(&hub, msg).await,
     };
