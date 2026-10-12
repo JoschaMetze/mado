@@ -18,6 +18,7 @@ import android.view.View
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import java.util.ArrayDeque
+import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.max
@@ -59,6 +60,7 @@ class AlertView(context: Context) : View(context) {
     }
     private val pill = RectF()
     private val edge = Path()
+    private val outline = FloatArray(256)
 
     fun show(alert: Alert) {
         val now = current
@@ -146,15 +148,13 @@ class AlertView(context: Context) : View(context) {
             else -> {
                 blob.color = 0xFF7BE0D0.toInt()
                 val layout = body ?: return
-                val ph = max(96f, layout.height + (if (alert.source != null) 30f else 0f) + 44f)
+                val ph = max(104f, layout.height + (if (alert.source != null) 30f else 0f) + 58f)
                 val pw = NUDGE_TEXT_W + 120f
                 val left = w - shown * (pw - 44f)
                 val top = h * 0.3f
                 pill.set(left, top, left + pw, top + ph)
-                canvas.drawRoundRect(pill, min(ph / 2, 56f), min(ph / 2, 56f), blob)
-                canvas.drawCircle(left + 4f + sin(t) * 4f, top + ph * 0.78f, 24f * shown, blob)
-                canvas.drawCircle(left - 34f, top + ph * 0.4f + cos(t * 1.4f) * 5f, 11f * shown, blob)
-                drawText(canvas, alert, left + 44f, top + 22f, textAlpha, null)
+                drawTongue(canvas, w, left, top, ph, t)
+                drawText(canvas, alert, left + 44f, top + 28f, textAlpha, null)
             }
         }
         postInvalidateOnAnimation()
@@ -195,6 +195,62 @@ class AlertView(context: Context) : View(context) {
             // Each bead starts inside the liquid, so it appears to pinch off rather than pop in.
             val bx = edgeX(by, t, cx, r, h) + 14f - u * BEADS[i + 1] * 3.6f
             canvas.drawCircle(bx, by - u * 26f, BEADS[i + 1] * (1f - u) * shown, blob)
+        }
+    }
+
+    /**
+     * Nudge: a tongue of the same liquid reaching in from the right edge. Its outline is one
+     * smooth closed curve: a rounded head whose radius breathes, and long edges with slow
+     * ripples that die away toward the head so the two join cleanly.
+     */
+    private fun drawTongue(canvas: Canvas, w: Float, left: Float, top: Float, ph: Float, t: Float) {
+        val r = ph / 2
+        val headX = left + r
+        val mid = top + r
+        val right = w + 30f
+        fun ripple(x: Float, phase: Float): Float {
+            val calm = min(1f, max(0f, (x - headX) / 140f))
+            return calm * (5f * sin(x * 0.019f + t * 1.4f + phase) + 3f * sin(x * 0.043f - t * 2.1f + phase))
+        }
+        var n = 0
+        fun point(x: Float, y: Float) {
+            outline[n++] = x
+            outline[n++] = y
+        }
+        var x = right
+        while (x > headX) {
+            point(x, top - ripple(x, 0f))
+            x -= 28f
+        }
+        for (i in 0..12) {
+            val a = (-PI / 2 - PI * i / 12).toFloat()
+            val rr = r * (1f + 0.07f * sin(3f * a + t * 1.7f) + 0.045f * sin(5f * a - t * 2.3f))
+            point(headX + rr * cos(a), mid + rr * sin(a))
+        }
+        x = headX + 28f
+        while (x < right) {
+            point(x, top + ph + ripple(x, 2f))
+            x += 28f
+        }
+        point(right, top + ph)
+
+        edge.rewind()
+        edge.moveTo(outline[0], outline[1])
+        var i = 2
+        while (i < n - 2) {
+            edge.quadTo(outline[i], outline[i + 1], (outline[i] + outline[i + 2]) / 2, (outline[i + 1] + outline[i + 3]) / 2)
+            i += 2
+        }
+        edge.lineTo(outline[n - 2], outline[n - 1])
+        edge.close()
+        canvas.drawPath(edge, blob)
+
+        // Beads leave the head and shrink away, as they do from the urgent flood.
+        for (b in 0 until 3) {
+            val u = (t / (3.4f + b * 1.3f) + b * 0.37f) % 1f
+            val a = (PI + (b - 1) * 0.55f).toFloat()
+            val reach = r + u * (46f + b * 14f)
+            canvas.drawCircle(headX + reach * cos(a), mid + reach * sin(a) * 0.9f - u * 10f, (15f - b * 3f) * (1f - u) * shown, blob)
         }
     }
 
