@@ -35,6 +35,8 @@ button.quiet{background:transparent;color:var(--muted);border-color:var(--line);
 ul{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:6px}
 li{display:flex;gap:10px;align-items:center;justify-content:space-between}
 li form{display:inline}
+li form.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
+li form.inline input[name=name]{width:11em;padding:4px 8px}
 .log li{justify-content:flex-start;font-size:.9rem}
 .log span,.muted{color:var(--muted)}
 .log span{flex:none;width:5.5em;font-variant-numeric:tabular-nums}
@@ -139,7 +141,9 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
         .enumerate()
         .map(|(i, p)| {
             format!(
-                r#"<li><span>{}{} <span class="muted">{:.3}, {:.3}</span></span>
+                r#"<li><form class="inline" method="post" action="/ui/places/rename"><input type="hidden" name="index" value="{i}">
+                <input name="name" value="{}" maxlength="40" required aria-label="Name shown on the frame"><button class="quiet">Rename</button>{}
+                <span class="muted">{:.2}, {:.2}</span></form>
                 <form method="post" action="/ui/places/remove"><input type="hidden" name="index" value="{i}"><button class="quiet">Remove</button></form></li>"#,
                 esc(&p.name), if i == 0 { r#" <span class="tag">here</span>"# } else { "" }, p.lat, p.lon
             )
@@ -286,6 +290,23 @@ pub async fn place_add(State(hub): State<Shared>, Form(place): Form<Place>) -> R
 #[derive(Deserialize)]
 pub struct Index {
     index: usize,
+}
+
+#[derive(Deserialize)]
+pub struct Rename {
+    index: usize,
+    name: String,
+}
+
+/// The name is what the frame shows, so a city can be labelled "Mum & Dad".
+pub async fn place_rename(State(hub): State<Shared>, Form(r): Form<Rename>) -> Redirect {
+    let name: String = r.name.trim().chars().take(40).collect();
+    let renamed = !name.is_empty()
+        && hub.config.write().unwrap().places.get_mut(r.index).map(|place| place.name = name).is_some();
+    if renamed {
+        save(&hub);
+    }
+    Redirect::to("/")
 }
 
 pub async fn place_remove(State(hub): State<Shared>, Form(Index { index }): Form<Index>) -> Redirect {
