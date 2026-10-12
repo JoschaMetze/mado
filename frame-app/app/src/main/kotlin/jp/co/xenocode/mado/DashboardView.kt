@@ -27,12 +27,13 @@ import kotlin.math.min
 /**
  * The home scene: a painting of the day, the time, and the projects agents report on, in four
  * layouts that all take their colours from the painting. Tap the painting's label to read
- * about it; tap anywhere else to move to the next layout.
+ * about it, the projects to open their page; tap anywhere else to move to the next layout.
  *
  * It is still unless something changes: one redraw a minute for the clock.
  */
 class DashboardView(context: Context) : View(context) {
-    class Project(val name: String, val status: String, val note: String, val progress: Float?)
+    /** `updated` is in seconds since the epoch, 0 when the hub did not say. */
+    class Project(val name: String, val status: String, val note: String, val progress: Float?, val updated: Long = 0)
 
     class Art(
         val title: String, val artist: String, val date: String, val medium: String, val credit: String,
@@ -41,6 +42,7 @@ class DashboardView(context: Context) : View(context) {
     )
 
     var onLayoutChosen: ((Int) -> Unit)? = null
+    var onProjects: (() -> Unit)? = null
     var layout = FULL_BLEED
         set(value) {
             field = value % LAYOUTS
@@ -85,6 +87,9 @@ class DashboardView(context: Context) : View(context) {
     private val dst = RectF()
     private val rect = RectF()
     private val plaque = RectF()
+    /** Where the projects are in the current layout, for taps; the pigments layout has two groups. */
+    private val studio = RectF()
+    private val studio2 = RectF()
     private val path = Path()
     private val moon = Path()
     private val bite = Path()
@@ -191,6 +196,8 @@ class DashboardView(context: Context) : View(context) {
         now.time = System.currentTimeMillis()
         val w = width.toFloat()
         val h = height.toFloat()
+        studio.setEmpty()
+        studio2.setEmpty()
         when (layout) {
             MATTED -> drawMatted(canvas, w, h)
             SPLIT -> drawSplit(canvas, w, h)
@@ -228,6 +235,7 @@ class DashboardView(context: Context) : View(context) {
             canvas.drawText(fit(p.note, type(17f, sans, WHITE, 0.8f, align = Paint.Align.RIGHT, shadow = true), 420f), w - 52f, y + 24f, text)
             y += 62f
         }
+        if (projects.isNotEmpty()) studio.set(w - 512f, 24f, w, y - 14f)
 
         val time = clock.format(now)
         canvas.drawText(time, 40f, h - 44f, type(186f, thin, WHITE, spacing = -0.02f, shadow = true))
@@ -310,6 +318,7 @@ class DashboardView(context: Context) : View(context) {
             canvas.drawText(fit(p.note, type(17f, sans, art.paper, 0.68f), right - x - 30f), x + 30f, y + 44f, text)
             y += 62f
         }
+        if (projects.isNotEmpty()) studio.set(x - 16f, top - 16f, w, y + 10f)
     }
 
     // --- C: painting left, a dark panel in its deepest colour right ------------------------
@@ -365,6 +374,7 @@ class DashboardView(context: Context) : View(context) {
             y += 58f
         }
         line.strokeCap = Paint.Cap.BUTT
+        if (projects.isNotEmpty()) studio.set(split, h - 52f - projects.size * 58f, w, h)
 
         fill.color = 0x99101010.toInt()
         rect.set(34f, h - 132f, 34f + 440f, h - 34f)
@@ -421,6 +431,8 @@ class DashboardView(context: Context) : View(context) {
                 canvas.drawText(fit(p.name, type(25f, bold, on), right - left - 80f), left + 52f, top - 13f, text)
             }
         }
+        if (projects.isNotEmpty()) studio.set(0f, h - 262f, edges[2] * w, h)
+        if (projects.size > 2) studio2.set(edges[3] * w, h - 262f, w, h)
         canvas.drawText(clock.format(now), w / 2, 320f, type(290f, thin, WHITE, spacing = -0.03f, align = Paint.Align.CENTER, shadow = true))
         weather?.let {
             canvas.drawText("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", w / 2, 396f, type(32f, italic, WHITE, align = Paint.Align.CENTER, shadow = true))
@@ -475,32 +487,7 @@ class DashboardView(context: Context) : View(context) {
         canvas.drawLine(x0, y, x1, y, line)
     }
 
-    // Shape carries the meaning as well as colour: dot, diamond, square, ring.
-    private fun drawMark(canvas: Canvas, status: String, cx: Float, cy: Float) {
-        val r = 6.5f
-        when (status) {
-            "needs_you" -> {
-                fill.color = 0xFFFFC35C.toInt()
-                canvas.save()
-                canvas.rotate(45f, cx, cy)
-                canvas.drawRect(cx - r * 0.85f, cy - r * 0.85f, cx + r * 0.85f, cy + r * 0.85f, fill)
-                canvas.restore()
-            }
-            "blocked" -> {
-                fill.color = 0xFFFF6B5E.toInt()
-                canvas.drawRect(cx - r, cy - r, cx + r, cy + r, fill)
-            }
-            "done" -> {
-                line.color = 0xFFB9C0C7.toInt()
-                line.strokeWidth = 2.2f
-                canvas.drawCircle(cx, cy, r - 1f, line)
-            }
-            else -> {
-                fill.color = 0xFF57D39B.toInt()
-                canvas.drawCircle(cx, cy, r, fill)
-            }
-        }
-    }
+    private fun drawMark(canvas: Canvas, status: String, cx: Float, cy: Float) = mark(canvas, status, cx, cy, 6.5f, fill, line)
 
     private fun word(status: String) = status.replace('_', ' ')
 
@@ -547,6 +534,7 @@ class DashboardView(context: Context) : View(context) {
         when {
             learnOpen -> learnOpen = false
             plaque.contains(event.x, event.y) -> learnOpen = true
+            studio.contains(event.x, event.y) || studio2.contains(event.x, event.y) -> onProjects?.invoke()
             else -> {
                 layout += 1
                 onLayoutChosen?.invoke(layout)
@@ -571,18 +559,45 @@ class DashboardView(context: Context) : View(context) {
         private const val MAT = 0xFFF5F0E6.toInt()
 
         /** What the dashboard wears before the first painting arrives. */
-        private val NO_ART = Art(
+        val NO_ART = Art(
             "Waiting for today's painting", "", "", "", "", "", null, null,
             ink = 0xFF101418.toInt(), paper = 0xFFF1EDE4.toInt(), wall = 0xFF1E2A33.toInt(), accent = 0xFFE8B86A.toInt(),
             swatches = intArrayOf(0xFF27404F.toInt(), 0xFF7A8C8E.toInt(), 0xFFD9C7A3.toInt(), 0xFFB4654A.toInt(), 0xFF1B2730.toInt()),
         )
 
+        // Shape carries the meaning as well as colour: dot, diamond, square, ring.
+        /** `fill` and `line` are the caller's fill and stroke paints; their colours are overwritten. */
+        fun mark(canvas: Canvas, status: String, cx: Float, cy: Float, r: Float, fill: Paint, line: Paint) {
+            when (status) {
+                "needs_you" -> {
+                    fill.color = 0xFFFFC35C.toInt()
+                    canvas.save()
+                    canvas.rotate(45f, cx, cy)
+                    canvas.drawRect(cx - r * 0.85f, cy - r * 0.85f, cx + r * 0.85f, cy + r * 0.85f, fill)
+                    canvas.restore()
+                }
+                "blocked" -> {
+                    fill.color = 0xFFFF6B5E.toInt()
+                    canvas.drawRect(cx - r, cy - r, cx + r, cy + r, fill)
+                }
+                "done" -> {
+                    line.color = 0xFFB9C0C7.toInt()
+                    line.strokeWidth = r * 0.34f
+                    canvas.drawCircle(cx, cy, r - 1f, line)
+                }
+                else -> {
+                    fill.color = 0xFF57D39B.toInt()
+                    canvas.drawCircle(cx, cy, r, fill)
+                }
+            }
+        }
+
         fun luminance(c: Int) = (0.299f * Color.red(c) + 0.587f * Color.green(c) + 0.114f * Color.blue(c)) / 255f
 
-        private fun withAlpha(c: Int, a: Float) = Color.argb((255 * a).toInt(), Color.red(c), Color.green(c), Color.blue(c))
+        fun withAlpha(c: Int, a: Float) = Color.argb((255 * a).toInt(), Color.red(c), Color.green(c), Color.blue(c))
 
         /** A pigment too close to the ground it sits on is lifted toward white until it reads. */
-        private fun visibleOn(ground: Int, c: Int): Int {
+        fun visibleOn(ground: Int, c: Int): Int {
             if (luminance(c) - luminance(ground) > 0.25f) return c
             val t = 0.45f
             return Color.rgb(

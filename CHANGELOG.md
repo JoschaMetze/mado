@@ -7,6 +7,9 @@
   to leave out (religious scenes, nudes, death and war). Set on the hub's page, which then
   picks a new painting that fits and says how many it chose from.
 - Hub page: "Recent" shows the newest six lines and folds the rest away.
+- Frame: tap the projects on the dashboard for a page of all of them, with each one's whole
+  note, progress and when it was last reported. It scrolls when the list is long; a tap
+  closes it, and it closes by itself after two minutes.
 
 ## 0.2.1
 

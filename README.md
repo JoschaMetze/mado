@@ -19,7 +19,8 @@ it stays smooth on very modest hardware.
   places you care about get a line each, with their local time. The frame fetches forecasts
   itself, so weather keeps working when the hub is down.
 - **Project status from your agents.** An agent reports where a project stands and the
-  dashboard keeps the latest word on each.
+  dashboard keeps the latest word on each. Tap them for a page of every project with its
+  whole note.
 - **Liquid alerts.** Anything on your network can put a message on the glass: a *whisper*
   (a bead at the edge), a *nudge* (one line that drains away) or *urgent* (stays until
   someone taps it).

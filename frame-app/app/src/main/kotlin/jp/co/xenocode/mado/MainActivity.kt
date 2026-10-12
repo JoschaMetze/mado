@@ -25,6 +25,7 @@ class MainActivity : Activity(), HubLink.Listener {
     private lateinit var rail: RailView
     private lateinit var nowPlaying: NowPlayingView
     private lateinit var dashboard: DashboardView
+    private lateinit var projectsPage: ProjectsView
     private lateinit var scenes: List<View>
     private var scene = DASHBOARD
     private var artVersion = -1L
@@ -65,7 +66,9 @@ class MainActivity : Activity(), HubLink.Listener {
         dashboard = DashboardView(this).apply {
             layout = prefs().getInt("dashboard_layout", DashboardView.FULL_BLEED)
             onLayoutChosen = { prefs().edit().putInt("dashboard_layout", it).apply() }
+            onProjects = { projectsPage.open() }
         }
+        projectsPage = ProjectsView(this)
         scenes = listOf(dashboard, nowPlaying)
         rail = RailView(this).apply {
             scenes = listOf("Dashboard", "Now playing")
@@ -83,6 +86,7 @@ class MainActivity : Activity(), HubLink.Listener {
         setBrightness(rail.brightness)
         root = FrameLayout(this).apply {
             scenes.forEach(::addView)
+            addView(projectsPage)
             addView(alerts)
             addView(rail)
         }
@@ -197,7 +201,7 @@ class MainActivity : Activity(), HubLink.Listener {
         link.fetch("/daily/$version/image.jpg") { imageBytes ->
             link.fetch("/daily/$version/qr.png") { qrBytes ->
                 if (version == paintingVersion) {
-                    dashboard.setArt(
+                    val art =
                         DashboardView.Art(
                             title = msg.optString("title"), artist = msg.optString("artist"), date = msg.optString("date"),
                             medium = msg.optString("medium"), credit = msg.optString("credit"), text = msg.optString("text"),
@@ -207,7 +211,8 @@ class MainActivity : Activity(), HubLink.Listener {
                             wall = color("wall", Color.DKGRAY), accent = color("accent", Color.WHITE),
                             swatches = IntArray(5) { i -> parse(swatches?.optString(i), Color.GRAY) },
                         )
-                    )
+                    dashboard.setArt(art)
+                    projectsPage.setArt(art)
                 }
             }
         }
@@ -215,15 +220,17 @@ class MainActivity : Activity(), HubLink.Listener {
 
     private fun projects(msg: JSONObject) {
         val items = msg.optJSONArray("items") ?: return
-        dashboard.setProjects(
+        val all =
             (0 until items.length()).map { i ->
                 val p = items.getJSONObject(i)
                 DashboardView.Project(
                     p.optString("name"), p.optString("status"), p.optString("note"),
                     if (p.isNull("progress")) null else p.optDouble("progress").toFloat(),
+                    p.optLong("updated"),
                 )
             }
-        )
+        dashboard.setProjects(all)
+        projectsPage.setProjects(all)
     }
 
     override fun onHubMessage(msg: JSONObject) {
@@ -251,6 +258,7 @@ class MainActivity : Activity(), HubLink.Listener {
 
     private fun showScene(index: Int) {
         if (index == scene) return
+        projectsPage.close()
         val leaving = scenes[scene]
         val arriving = scenes[index]
         scene = index
