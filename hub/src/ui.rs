@@ -1,0 +1,184 @@
+//! The web interface: status, a test alert, and all configuration. Server-rendered, no script.
+
+use axum::{
+    extract::State,
+    http::{header::HOST, HeaderMap},
+    response::{Html, Redirect},
+    Form,
+};
+use serde::Deserialize;
+
+use crate::{Notify, Place, Shared};
+
+const STYLE: &str = r#"
+:root{--bg:#0d1217;--panel:#151c23;--fg:#e7edf2;--muted:#94a2b0;--line:#27323d;--accent:#ff7fa8;--ok:#4fd19c;--bad:#ff7b7b;color-scheme:dark}
+@media (prefers-color-scheme:light){:root{--bg:#edf0f3;--panel:#fff;--fg:#15202b;--muted:#5b6876;--line:#d3dae1;--accent:#c2376b;--ok:#1f9d6b;--bad:#d24b4b;color-scheme:light}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:32px 20px 80px;display:grid;gap:28px}
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1{margin:0;font-size:2.2rem;letter-spacing:-.02em}
+h2{margin:0 0 12px;font-size:1.05rem}
+.tag{font:500 .75rem ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:28px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;min-width:0}
+.glass{display:block;width:100%;aspect-ratio:16/10;background:#000;border-radius:6px;border:6px solid #05070a;object-fit:cover;color:var(--muted)}
+.dot{display:inline-block;width:.6em;height:.6em;border-radius:50%;margin-right:.5em;background:var(--bad)}
+.dot.up{background:var(--ok)}
+form{display:grid;gap:10px}
+label{display:grid;gap:4px;font-size:.85rem;color:var(--muted)}
+input,select,button{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:0}
+button{cursor:pointer;background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600;justify-self:start}
+button.quiet{background:transparent;color:var(--muted);border-color:var(--line);font-weight:400;padding:2px 8px}
+.row{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px}
+ul{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:6px}
+li{display:flex;gap:10px;align-items:center;justify-content:space-between}
+li form{display:inline}
+.log li{justify-content:flex-start;font-size:.9rem}
+.log span,.muted{color:var(--muted)}
+.log span{flex:none;width:5.5em;font-variant-numeric:tabular-nums}
+code{font:.85em ui-monospace,Menlo,monospace;background:var(--bg);padding:.15em .4em;border-radius:4px;overflow-wrap:anywhere}
+"#;
+
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+fn ago(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("{secs}s ago"),
+        60..=3599 => format!("{}m ago", secs / 60),
+        _ => format!("{}h ago", secs / 3600),
+    }
+}
+
+pub async fn index(State(hub): State<Shared>, headers: HeaderMap) -> Html<String> {
+    let host = headers.get(HOST).and_then(|h| h.to_str().ok()).unwrap_or("HUB_ADDRESS:7878");
+
+    let frames = hub.frames.lock().unwrap();
+    let status = if frames.is_empty() {
+        format!(
+            r#"<p><i class="dot"></i>No frame connected.</p>
+            <p class="muted">Point the frame at this hub once, over USB:</p>
+            <p><code>adb shell am start -n jp.co.xenocode.mado/.MainActivity --es hub ws://{}/frame</code></p>"#,
+            esc(host)
+        )
+    } else {
+        frames
+            .values()
+            .map(|f| {
+                format!(
+                    r#"<p><i class="dot up"></i>{} · connected {}</p>"#,
+                    esc(f.hello["model"].as_str().unwrap_or("Frame")),
+                    ago(f.since.elapsed().as_secs())
+                )
+            })
+            .collect()
+    };
+    let glass = if frames.is_empty() {
+        r#"<div class="glass"></div>"#.to_owned()
+    } else {
+        r#"<img class="glass" src="/api/look" alt="What the frame is showing now"><p><a href="/">Refresh</a></p>"#.to_owned()
+    };
+    drop(frames);
+
+    let places: String = hub
+        .config
+        .read()
+        .unwrap()
+        .places
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            format!(
+                r#"<li><span>{} <span class="muted">{:.3}, {:.3}</span></span>
+                <form method="post" action="/ui/places/remove"><input type="hidden" name="index" value="{i}"><button class="quiet">Remove</button></form></li>"#,
+                esc(&p.name), p.lat, p.lon
+            )
+        })
+        .collect();
+    let places = if places.is_empty() { r#"<li class="muted">No places yet.</li>"#.to_owned() } else { places };
+
+    let log: String = hub
+        .log
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| format!("<li><span>{}</span>{}</li>", ago(e.at.elapsed().as_secs()), esc(&e.line)))
+        .collect();
+
+    Html(format!(
+        r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mado hub</title><style>{STYLE}</style>
+<main>
+<header><h1>Mado</h1><span class="tag">hub · {version}</span></header>
+<div class="cols">
+  <section><h2>On the glass</h2>{glass}{status}</section>
+  <section><h2>Send an alert</h2>
+    <form method="post" action="/ui/notify">
+      <label>Message<input name="text" maxlength="280" required placeholder="Kettle's boiled"></label>
+      <label>Level<select name="level"><option>whisper</option><option selected>nudge</option><option>urgent</option></select></label>
+      <label>From<input name="source" placeholder="you"></label>
+      <button>Send to frame</button>
+    </form>
+  </section>
+</div>
+<div class="cols">
+  <section><h2>Weather places</h2>
+    <ul>{places}</ul>
+    <form method="post" action="/ui/places/add">
+      <div class="row">
+        <label>Name<input name="name" required placeholder="Mum &amp; Dad"></label>
+        <label>Latitude<input name="lat" type="number" step="any" min="-90" max="90" required></label>
+        <label>Longitude<input name="lon" type="number" step="any" min="-180" max="180" required></label>
+      </div>
+      <button>Add place</button>
+    </form>
+  </section>
+  <section><h2>Recent</h2><ul class="log">{log}</ul>
+    <p class="muted">Agents connect to <code>http://{host}/mcp</code></p>
+  </section>
+</div>
+</main></html>"#,
+        version = env!("CARGO_PKG_VERSION"),
+        host = esc(host),
+    ))
+}
+
+pub async fn notify(State(hub): State<Shared>, Form(n): Form<Notify>) -> Redirect {
+    if let Err(e) = hub.notify(n) {
+        hub.log(format!("alert not sent: {e}"));
+    }
+    Redirect::to("/")
+}
+
+pub async fn place_add(State(hub): State<Shared>, Form(place): Form<Place>) -> Redirect {
+    let valid = !place.name.trim().is_empty() && (-90.0..=90.0).contains(&place.lat) && (-180.0..=180.0).contains(&place.lon);
+    if valid {
+        hub.config.write().unwrap().places.push(Place { name: place.name.trim().to_owned(), ..place });
+        save(&hub);
+    }
+    Redirect::to("/")
+}
+
+#[derive(Deserialize)]
+pub struct Index {
+    index: usize,
+}
+
+pub async fn place_remove(State(hub): State<Shared>, Form(Index { index }): Form<Index>) -> Redirect {
+    {
+        let mut config = hub.config.write().unwrap();
+        if index < config.places.len() {
+            config.places.remove(index);
+        }
+    }
+    save(&hub);
+    Redirect::to("/")
+}
+
+fn save(hub: &Shared) {
+    if let Err(e) = hub.config_changed() {
+        hub.log(format!("could not save config: {e}"));
+    }
+}

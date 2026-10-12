@@ -1,0 +1,22 @@
+[package]
+name = "mado-hub"
+version = "0.1.0"
+edition = "2021"
+description = "Hub for Mado frames: relays alerts, scenes and screenshots between senders (HTTP, MCP) and the frame."
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
+futures-util = "0.3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+
+# Artwork resizing is painfully slow in an unoptimised `image`.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+strip = true
+lto = "thin"

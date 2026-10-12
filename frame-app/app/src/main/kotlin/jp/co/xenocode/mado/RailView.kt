@@ -1,0 +1,235 @@
+package jp.co.xenocode.mado
+
+import android.animation.ValueAnimator
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.text.TextPaint
+import android.text.TextUtils
+import android.view.MotionEvent
+import android.view.View
+import android.view.animation.DecelerateInterpolator
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * The rail: device controls that slide in from the left edge and hide again by themselves.
+ * Closed, it only claims touches that start on the left edge (tap or swipe), so everything else falls through
+ * to the views underneath.
+ */
+class RailView(context: Context) : View(context) {
+    var onBrightness: ((Float) -> Unit)? = null
+    var onHome: (() -> Unit)? = null
+    var onScene: ((Int) -> Unit)? = null
+
+    var scenes: List<String> = emptyList()
+    var activeScene = 0
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    /** Window brightness, MIN_BRIGHTNESS..1. */
+    var brightness = 1f
+    var linkUp = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+    var hubAddress: String? = null
+
+    private var open = 0f
+    private var animator: ValueAnimator? = null
+    private val autoHide = Runnable { settle(false) }
+
+    private enum class Touch { NONE, DRAG, SLIDER, PRESS, OUTSIDE }
+    private var touch = Touch.NONE
+    private var downX = 0f
+    private var downY = 0f
+    private var downOpen = 0f
+
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = FG
+    }
+    private val label = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = FG
+        textSize = 22f
+    }
+    private val small = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = FG
+        typeface = Typeface.MONOSPACE
+        textSize = 13f
+        letterSpacing = 0.14f
+    }
+    private val rect = RectF()
+
+    private fun settle(toOpen: Boolean) {
+        removeCallbacks(autoHide)
+        if (toOpen) postDelayed(autoHide, AUTO_HIDE_MS)
+        animator?.cancel()
+        animator = ValueAnimator.ofFloat(open, if (toOpen) 1f else 0f).apply {
+            duration = 260
+            interpolator = DecelerateInterpolator(1.6f)
+            addUpdateListener {
+                open = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val h = height.toFloat()
+        if (open <= 0f) {
+            // A faint grip so the edge is discoverable.
+            fill.color = 0x30FFFFFF
+            rect.set(-3f, h / 2 - 34f, 3f, h / 2 + 34f)
+            canvas.drawRoundRect(rect, 3f, 3f, fill)
+            return
+        }
+        fill.color = (0x59 * open).toInt() shl 24
+        canvas.drawRect(0f, 0f, width.toFloat(), h, fill)
+
+        canvas.save()
+        canvas.translate((open - 1f) * W, 0f)
+        fill.color = PANEL
+        canvas.drawRect(0f, 0f, W, h, fill)
+
+        small.alpha = 150
+        canvas.drawText("MADO", PAD, 62f, small)
+
+        scenes.forEachIndexed { i, name ->
+            val top = SCENE_Y + i * ROW_STEP
+            val mid = top + ROW_H / 2
+            if (i == activeScene) {
+                fill.color = 0x24FFFFFF
+                rect.set(14f, top, W - 14f, top + ROW_H)
+                canvas.drawRoundRect(rect, 14f, 14f, fill)
+                fill.color = FG
+                canvas.drawCircle(PAD + 8f, mid, 6f, fill)
+            } else {
+                canvas.drawCircle(PAD + 8f, mid, 5f, stroke)
+            }
+            label.alpha = if (i == activeScene) 255 else 170
+            canvas.drawText(name, PAD + 32f, mid + 8f, label)
+        }
+        label.alpha = 255
+        val sliderY = sliderY()
+        val homeY = sliderY + 50f
+
+        canvas.drawText("BRIGHTNESS", PAD, sliderY - 28f, small)
+        val knob = PAD + (W - 2 * PAD) * (brightness - MIN_BRIGHTNESS) / (1f - MIN_BRIGHTNESS)
+        fill.color = 0x38FFFFFF
+        rect.set(PAD, sliderY - 3f, W - PAD, sliderY + 3f)
+        canvas.drawRoundRect(rect, 3f, 3f, fill)
+        fill.color = FG
+        rect.right = knob
+        canvas.drawRoundRect(rect, 3f, 3f, fill)
+        canvas.drawCircle(knob, sliderY, 12f, fill)
+
+        rect.set(PAD, homeY + ROW_H / 2 - 8f, PAD + 16f, homeY + ROW_H / 2 + 8f)
+        canvas.drawRoundRect(rect, 4f, 4f, stroke)
+        canvas.drawText("Home screen", PAD + 32f, homeY + ROW_H / 2 + 8f, label)
+
+        fill.color = if (linkUp) 0xFF4FD19C.toInt() else 0xFFFF7B7B.toInt()
+        canvas.drawCircle(PAD + 5f, h - 58f, 5f, fill)
+        canvas.drawText(if (linkUp) "HUB CONNECTED" else "NO HUB", PAD + 20f, h - 53f, small)
+        val address = hubAddress?.removePrefix("ws://")?.removeSuffix("/frame") ?: "not set"
+        small.alpha = 110
+        canvas.drawText(TextUtils.ellipsize(address, small, W - 2 * PAD, TextUtils.TruncateAt.END).toString(), PAD, h - 30f, small)
+        canvas.restore()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
+                downOpen = open
+                touch = when {
+                    open < 0.01f -> if (event.x <= EDGE) Touch.DRAG else return false
+                    event.x > W * open -> Touch.OUTSIDE
+                    abs(event.y - sliderY()) < 34f -> Touch.SLIDER
+                    else -> Touch.PRESS
+                }
+                animator?.cancel()
+                removeCallbacks(autoHide)
+                if (touch == Touch.SLIDER) slide(event.x)
+            }
+            MotionEvent.ACTION_MOVE -> when (touch) {
+                Touch.DRAG -> {
+                    open = min(1f, max(0f, downOpen + (event.x - downX) / W))
+                    invalidate()
+                }
+                Touch.SLIDER -> slide(event.x)
+                // A sideways pull on the panel turns into dragging it shut.
+                Touch.PRESS -> if (abs(event.x - downX) > 18f) touch = Touch.DRAG
+                else -> {}
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val was = touch
+                touch = Touch.NONE
+                when (was) {
+                    Touch.DRAG -> settle(
+                        when {
+                            // A plain tap on the left edge opens the rail too.
+                            downOpen < 0.01f && abs(event.x - downX) < TAP_SLOP -> true
+                            downOpen < 0.5f -> open > 0.3f
+                            else -> open > 0.7f
+                        }
+                    )
+                    Touch.OUTSIDE -> settle(false)
+                    Touch.PRESS -> press(event.actionMasked == MotionEvent.ACTION_UP)
+                    else -> settle(true)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun sliderY() = SCENE_Y + scenes.size * ROW_STEP + 78f
+
+    private fun press(lifted: Boolean) {
+        val homeY = sliderY() + 50f
+        val scene = ((downY - SCENE_Y) / ROW_STEP).toInt()
+        when {
+            !lifted -> settle(true)
+            downY in homeY..homeY + ROW_H -> {
+                settle(false)
+                onHome?.invoke()
+            }
+            downY >= SCENE_Y && scene < scenes.size -> {
+                settle(false)
+                onScene?.invoke(scene)
+            }
+            else -> settle(true)
+        }
+    }
+
+    private fun slide(x: Float) {
+        val v = min(1f, max(0f, (x - PAD) / (W - 2 * PAD)))
+        brightness = MIN_BRIGHTNESS + (1f - MIN_BRIGHTNESS) * v
+        onBrightness?.invoke(brightness)
+        invalidate()
+    }
+
+    companion object {
+        const val MIN_BRIGHTNESS = 0.03f
+        private const val W = 250f
+        private const val PAD = 28f
+        private const val EDGE = 64f
+        private const val TAP_SLOP = 14f
+        private const val ROW_H = 60f
+        private const val ROW_STEP = ROW_H + 6f
+        private const val SCENE_Y = 96f
+        private const val AUTO_HIDE_MS = 6_000L
+        private const val FG = 0xFFFFFFFF.toInt()
+        private const val PANEL = 0xE6101319.toInt()
+    }
+}
