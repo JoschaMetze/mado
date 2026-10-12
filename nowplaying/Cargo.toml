@@ -2,6 +2,8 @@
 name = "mado-nowplaying"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/abradburne/mado"
 description = "macOS helper that tells a Mado hub what Apple Music is playing, and carries play/pause taps back."
 
 [dependencies]

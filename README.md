@@ -154,3 +154,8 @@ Paintings and their descriptions come from the
 public domain are used. Forecasts and city search come from
 [Open-Meteo](https://open-meteo.com). Album artwork that Music does not have locally is
 looked up in the iTunes catalogue.
+
+## Licence
+
+[MIT](LICENSE). The paintings shown are in the public domain; Mado's licence covers the
+software, not the artwork or the museum's descriptions.

@@ -2,6 +2,8 @@
 name = "mado-hub"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/abradburne/mado"
 description = "Hub for Mado frames: relays alerts, scenes and screenshots between senders (HTTP, MCP) and the frame."
 
 [dependencies]
