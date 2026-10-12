@@ -50,8 +50,11 @@ class DashboardView(context: Context) : View(context) {
     private var art = NO_ART
     private var projects: List<Project> = emptyList()
     private var weather: Weather? = null
-    private var away: Weather? = null
-    private val awayClock = SimpleDateFormat("HH:mm", Locale.US)
+    private class Away(val weather: Weather) {
+        val clock = SimpleDateFormat("HH:mm", Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone(weather.timezone) }
+    }
+
+    private var away: List<Away> = emptyList()
     private var learnOpen = false
     private var learn = 0f
     private var learnTitle: StaticLayout? = null
@@ -78,6 +81,7 @@ class DashboardView(context: Context) : View(context) {
     private val scrimTop = Paint()
     private val scrimBottom = Paint()
     private val src = Rect()
+    private val bounds = Rect()
     private val dst = RectF()
     private val rect = RectF()
     private val plaque = RectF()
@@ -105,27 +109,22 @@ class DashboardView(context: Context) : View(context) {
         invalidate()
     }
 
-    /** Weather for a second place, somewhere the owner cares about, shown with its local time. */
-    fun setAway(weather: Weather?) {
-        away = weather
-        if (weather != null) awayClock.timeZone = java.util.TimeZone.getTimeZone(weather.timezone)
+    /** Weather for other places the owner cares about, each shown with its local time. */
+    fun setAway(places: List<Weather>) {
+        away = places.map(::Away)
         invalidate()
     }
 
-    private fun awayLine(): String? = away?.let {
-        "${it.place} ${awayClock.format(now)} · ${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}"
-    }
-
-    /** The second place on one line, led by a small sun or moon for whether it is day there. */
+    /** Another place on one line, led by a small sun or moon for whether it is day there. */
     private fun drawAway(
-        canvas: Canvas, x: Float, y: Float, size: Float, color: Int, alpha: Float, align: Paint.Align, shadow: Boolean, maxWidth: Float,
+        canvas: Canvas, from: Away, x: Float, y: Float, size: Float, color: Int, alpha: Float, align: Paint.Align, shadow: Boolean, maxWidth: Float,
         /** Left-aligned rows only: name and time stay left, temperature and forecast go to the right edge. */
         spread: Boolean = false,
     ) {
-        val place = away ?: return
-        val where = "${place.place} ${awayClock.format(now)}"
+        val place = from.weather
+        val where = "${place.place} ${from.clock.format(now)}"
         val what = "${place.tempC}° · ${place.sentence.replaceFirstChar(Char::lowercase)}"
-        val line = if (spread) where else fit(awayLine() ?: return, type(size, sans, color, alpha, shadow = shadow), maxWidth - SKY_W)
+        val line = if (spread) where else fit("$where · $what", type(size, sans, color, alpha, shadow = shadow), maxWidth - SKY_W)
         val width = type(size, sans, color, alpha, shadow = shadow).measureText(line) + SKY_W
         val left = when (align) {
             Paint.Align.RIGHT -> x - width
@@ -236,14 +235,15 @@ class DashboardView(context: Context) : View(context) {
         canvas.drawText(weekday.format(now).uppercase(), x, h - 82f, mono(WHITE, shadow = true, size = 16f))
         canvas.drawText(dayMonth.format(now).uppercase(), x, h - 56f, mono(WHITE, shadow = true, size = 16f))
 
+        val awayA = away.take(3)
         weather?.let {
-            val lift = if (away != null) 12f else 0f
+            val lift = if (awayA.isEmpty()) 0f else 12f + (awayA.size - 1) * AWAY_STEP
             canvas.drawText("${it.tempC}°", w - 46f, h - 98f - lift, type(78f, thin, WHITE, align = Paint.Align.RIGHT, shadow = true))
             canvas.drawText(it.sentence, w - 52f, h - 54f - lift, type(28f, italic, WHITE, align = Paint.Align.RIGHT, shadow = true))
         }
-        if (away != null) {
-            hairline(canvas, w - 52f - 260f, w - 52f, h - 50f, WHITE, 0.45f)
-            drawAway(canvas, w - 52f, h - 24f, 17f, WHITE, 0.88f, Paint.Align.RIGHT, true, 620f)
+        if (awayA.isNotEmpty()) hairline(canvas, w - 52f - 260f, w - 52f, h - 50f - (awayA.size - 1) * AWAY_STEP, WHITE, 0.45f)
+        awayA.forEachIndexed { i, place ->
+            drawAway(canvas, place, w - 52f, h - 24f - (awayA.size - 1 - i) * AWAY_STEP, 17f, WHITE, 0.88f, Paint.Align.RIGHT, true, 620f)
         }
     }
 
@@ -273,17 +273,24 @@ class DashboardView(context: Context) : View(context) {
 
         val x = 716f
         val right = w - 70f
-        canvas.drawText(clock.format(now), x - 8f, 206f, type(176f, thin, art.paper, spacing = -0.02f))
-        canvas.drawText("${weekday.format(now)} · ${dayMonth.format(now)}".uppercase(), x, 252f, mono(art.paper, 0.72f, 16f))
+        val time = clock.format(now)
+        canvas.drawText(time, x - 8f, 206f, type(176f, thin, art.paper, spacing = -0.02f))
+        // The date sits centred under the numerals themselves.
+        text.getTextBounds(time, 0, time.length, bounds)
+        val middle = x - 8f + (bounds.left + bounds.right) / 2f
+        canvas.drawText("${weekday.format(now)} · ${dayMonth.format(now)}".uppercase(), middle, 252f, mono(art.paper, 0.72f, 16f, Paint.Align.CENTER))
         rule(canvas, x, right, 290f)
         weather?.let {
             canvas.drawText(fit(it.sentence + ".", type(34f, italic, art.paper), right - x), x, 346f, text)
             canvas.drawText(fit(it.detail, type(17f, sans, art.paper, 0.72f), right - x), x, 378f, text)
             rule(canvas, x, right, 402f)
-            if (away != null) {
-                drawAway(canvas, x, 431f, 17f, art.paper, 0.72f, Paint.Align.LEFT, false, right - x, spread = true)
-                rule(canvas, x, right, 448f)
+            // As many other places as fit above the projects; always at least one.
+            val room = ((736f - projects.size * 62f - 30f - 34f - 431f) / AWAY_STEP).toInt() + 1
+            val shown = away.take(room.coerceIn(1, 4))
+            shown.forEachIndexed { i, place ->
+                drawAway(canvas, place, x, 431f + i * AWAY_STEP, 17f, art.paper, 0.72f, Paint.Align.LEFT, false, right - x, spread = true)
             }
+            if (shown.isNotEmpty()) rule(canvas, x, right, 448f + (shown.size - 1) * AWAY_STEP)
         }
 
         val top = 736f - projects.size * 62f
@@ -314,10 +321,14 @@ class DashboardView(context: Context) : View(context) {
         canvas.drawText(shortDate.format(now).uppercase(), x, 438f, mono(art.paper, 0.7f, 16f))
         weather?.let {
             canvas.drawText(fit("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", type(23f, bold, art.paper), right - x), x, 480f, text)
-            // There is room for one more line above four projects: the second place if there is one.
-            if (away != null) {
+            // Above four projects there is room for one more line; with fewer, for more places.
+            val room = ((h - 40f - projects.size * 58f - 16f - 514f) / AWAY_STEP).toInt() + 1
+            val shown = away.take(room.coerceIn(1, 4))
+            if (shown.isNotEmpty()) {
                 hairline(canvas, x, right, 493f, art.paper, 0.2f)
-                drawAway(canvas, x, 514f, 16f, art.paper, 0.7f, Paint.Align.LEFT, false, right - x, spread = true)
+                shown.forEachIndexed { i, place ->
+                    drawAway(canvas, place, x, 514f + i * AWAY_STEP, 16f, art.paper, 0.7f, Paint.Align.LEFT, false, right - x, spread = true)
+                }
             } else {
                 canvas.drawText(fit("${it.highC}° high" + if (it.sunset.isEmpty()) "" else " · sunset ${it.sunset}", type(16f, sans, art.paper, 0.7f), right - x), x, 506f, text)
             }
@@ -408,9 +419,9 @@ class DashboardView(context: Context) : View(context) {
         weather?.let {
             canvas.drawText("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", w / 2, 396f, type(32f, italic, WHITE, align = Paint.Align.CENTER, shadow = true))
         }
-        if (away != null) {
-            hairline(canvas, w / 2 - 130f, w / 2 + 130f, 412f, WHITE, 0.5f)
-            drawAway(canvas, w / 2, 440f, 19f, WHITE, 0.9f, Paint.Align.CENTER, true, 900f)
+        if (away.isNotEmpty()) hairline(canvas, w / 2 - 130f, w / 2 + 130f, 412f, WHITE, 0.5f)
+        away.take(3).forEachIndexed { i, place ->
+            drawAway(canvas, place, w / 2, 440f + i * 30f, 19f, WHITE, 0.9f, Paint.Align.CENTER, true, 900f)
         }
     }
 
@@ -547,6 +558,7 @@ class DashboardView(context: Context) : View(context) {
         private const val LAYOUTS = 4
         private const val MAX_PROJECTS = 4
         private const val SKY_W = 22f
+        private const val AWAY_STEP = 27f
         private const val LEARN_W = 564f
         private const val LEARN_TEXT_W = 460
         private const val WHITE = 0xFFFFFFFF.toInt()

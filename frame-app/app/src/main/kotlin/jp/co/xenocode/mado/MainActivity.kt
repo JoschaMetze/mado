@@ -40,6 +40,7 @@ class MainActivity : Activity(), HubLink.Listener {
     private val backHome = Runnable { showScene(HOME) }
     private var link: HubLink? = null
     private lateinit var weatherSource: WeatherSource
+    private var away = arrayOfNulls<Weather>(0)
     private val weatherWatch = object : Runnable {
         override fun run() {
             refreshWeather()
@@ -142,7 +143,7 @@ class MainActivity : Activity(), HubLink.Listener {
         }
     }
 
-    // The first place in the hub's list is "here", the second is somewhere else that matters
+    // The first place in the hub's list is "here"; the rest are other places that matter
     // (family, say). The saved copy keeps weather working when the hub is unreachable.
     private fun refreshWeather() {
         val places = try {
@@ -151,12 +152,23 @@ class MainActivity : Activity(), HubLink.Listener {
             null
         }
         val here = places?.optJSONObject(0)
-        val away = places?.optJSONObject(1)
         if (here == null) dashboard.setWeather(null)
-        if (away == null) dashboard.setAway(null)
         // A failed refresh keeps the last forecast on screen rather than blanking it.
         here?.let { p -> weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) { if (it != null) dashboard.setWeather(it) } }
-        away?.let { p -> weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) { if (it != null) dashboard.setAway(it) } }
+
+        val others = (1 until (places?.length() ?: 0)).mapNotNull { places?.optJSONObject(it) }
+        if (others.size != away.size) away = arrayOfNulls(others.size)
+        if (others.isEmpty()) dashboard.setAway(emptyList())
+        val slots = away
+        others.forEachIndexed { i, p ->
+            weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) {
+                // The list may have changed while this was in flight; then these slots are stale.
+                if (it != null && slots === away) {
+                    slots[i] = it
+                    dashboard.setAway(slots.filterNotNull())
+                }
+            }
+        }
     }
 
     /** The frame owns the date: it asks the hub for a painting once per local day. */
