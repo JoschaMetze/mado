@@ -9,7 +9,7 @@ use axum::{
 use base64::Engine;
 use serde_json::{json, Value};
 
-use crate::{Notify, Shared};
+use crate::{projects, Notify, Shared};
 
 const PROTOCOL: &str = "2025-06-18";
 
@@ -75,6 +75,22 @@ fn tools() -> Value {
             }
         },
         {
+            "name": "frame_project",
+            "description": "Report where a project stands. The frame's dashboard lists the latest report per project, \
+                so call this when a piece of work finishes, gets blocked, or needs the owner. \
+                Reuse the exact project name to update it; status archived takes it off the dashboard.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Short project name, at most 40 characters." },
+                    "status": { "type": "string", "enum": ["on_track", "needs_you", "blocked", "done", "archived"] },
+                    "note": { "type": "string", "description": "One short line on where it stands, at most 120 characters." },
+                    "progress": { "type": "number", "minimum": 0, "maximum": 1, "description": "Optional fraction complete." }
+                },
+                "required": ["name", "status"]
+            }
+        },
+        {
             "name": "frame_look",
             "description": "Return a picture of what the frame is showing right now (1280x800 JPEG).",
             "inputSchema": { "type": "object", "properties": {} }
@@ -93,6 +109,10 @@ async fn call(hub: &Shared, params: &Value) -> Value {
         "frame_notify" => serde_json::from_value::<Notify>(args)
             .map_err(|e| e.to_string())
             .and_then(|n| hub.notify(n))
+            .map(text),
+        "frame_project" => serde_json::from_value::<projects::Update>(args)
+            .map_err(|e| e.to_string())
+            .and_then(|u| hub.update_project(u))
             .map(text),
         "frame_look" => hub.look().await.map(|jpeg| {
             json!({ "type": "image", "mimeType": "image/jpeg",

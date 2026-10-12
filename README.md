@@ -6,19 +6,24 @@ it stays smooth on very modest hardware.
 
 What works today:
 
+- **A dashboard that is a painting.** Each day the hub picks a public-domain painting from
+  the Art Institute of Chicago. The frame shows it with the time and your projects in one of
+  four layouts, all coloured from the painting itself. Tap the label to read about it and
+  get a QR code for the museum's page; tap elsewhere for the next layout.
+- **Project status.** Agents report where a project stands (`frame_project`) and the
+  dashboard keeps the latest word on each.
 - **Now playing.** The album cover of whatever Apple Music is playing on your Mac, with a
   backdrop made from the cover. Tap the cover to fill the screen with it; tap the text to
   play or pause.
 - **Liquid alerts.** Anything on your network can put a message on the glass at one of three
   levels: a *whisper* (a bead at the edge), a *nudge* (one line that leaves by itself) or
   *urgent* (stays until dismissed).
-- **MCP.** Agents get `frame_notify`, `frame_look` (a screenshot of the frame) and
-  `frame_state`.
+- **MCP.** Agents get `frame_notify`, `frame_project`, `frame_look` (a screenshot of the
+  frame) and `frame_state`.
 - **The rail.** Tap or swipe the left edge of the frame for scenes, brightness and the way
   back to the launcher.
 
-Planned: Tama (a small on-screen companion), weather for several places, a dashboard, agent
-canvases, night mode.
+Planned: weather, Tama (a small on-screen companion), agent canvases, night mode.
 
 ## How it fits together
 
@@ -86,6 +91,7 @@ curl -X POST http://HOST:7878/api/notify \
 | `POST /api/notify` | `text`, optional `level` (`whisper`, `nudge`, `urgent`), `source`, `ttl_s` |
 | `GET /api/look` | JPEG of what the frame is showing |
 | `GET /api/state` | Connected frames, now playing, config, recent activity |
+| `POST /api/project` | `name`, `status` (`on_track`, `needs_you`, `blocked`, `done`, `archived`), optional `note`, `progress` 0 to 1 |
 | `POST /api/now_playing` | What a player is doing; see `nowplaying/src/main.rs` for the shape. A helper for another player (Spotify, say) posts the same JSON. |
 | `POST /mcp` | MCP over streamable HTTP |
 

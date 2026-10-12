@@ -3,15 +3,17 @@
 //! The frame dials `/frame` (WebSocket) and stays connected. Senders talk to the hub over
 //! plain HTTP (`/api/*`), MCP (`/mcp`) or the web interface (`/`); the hub relays to the frame.
 
+mod art;
 mod mcp;
 mod nowplaying;
+mod projects;
 mod ui;
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, RwLock,
     },
     time::{Duration, Instant},
@@ -81,6 +83,10 @@ pub struct Hub {
     pub now_playing: Mutex<nowplaying::Playing>,
     /// Latest media command for the now-playing helper, numbered so none is missed or repeated.
     pub commands: watch::Sender<(u64, String)>,
+    pub art: Mutex<Option<Arc<art::Daily>>>,
+    pub art_busy: AtomicBool,
+    pub projects: Mutex<Vec<projects::Project>>,
+    pub data_dir: PathBuf,
     looks: Mutex<HashMap<u64, oneshot::Sender<String>>>,
     next_id: AtomicU64,
     config_path: PathBuf,
@@ -93,19 +99,27 @@ impl Hub {
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
+        let projects = std::fs::read(data_dir.join("projects.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
         Hub {
             frames: Mutex::default(),
             config: RwLock::new(config),
             log: Mutex::default(),
             now_playing: Mutex::default(),
             commands: watch::channel((0, String::new())).0,
+            art: Mutex::default(),
+            art_busy: AtomicBool::new(false),
+            projects: Mutex::new(projects),
+            data_dir,
             looks: Mutex::default(),
             next_id: AtomicU64::new(1),
             config_path,
         }
     }
 
-    fn id(&self) -> u64 {
+    pub fn id(&self) -> u64 {
         self.next_id.fetch_add(1, Ordering::Relaxed)
     }
 
@@ -203,7 +217,12 @@ impl Hub {
             .map(|e| json!({ "ago_s": e.at.elapsed().as_secs(), "line": e.line }))
             .collect();
         let now_playing = self.now_playing.lock().unwrap().message();
-        json!({ "frames": frames, "now_playing": now_playing, "config": *self.config.read().unwrap(), "recent": recent })
+        let art = self.art.lock().unwrap().as_ref().map(|a| a.message());
+        let projects = self.projects_message()["items"].take();
+        json!({
+            "frames": frames, "now_playing": now_playing, "art": art, "projects": projects,
+            "config": *self.config.read().unwrap(), "recent": recent,
+        })
     }
 
     fn on_frame_msg(&self, id: u64, msg: Value) {
@@ -242,6 +261,7 @@ async fn frame_session(socket: WebSocket, hub: Shared) {
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let _ = tx.send(json!({ "t": "config", "config": *hub.config.read().unwrap() }).to_string());
     let _ = tx.send(hub.now_playing.lock().unwrap().message().to_string());
+    let _ = tx.send(hub.projects_message().to_string());
     hub.frames.lock().unwrap().insert(id, FrameConn { tx, hello: Value::Null, since: Instant::now() });
     hub.log(format!("frame #{id} connected"));
 
@@ -255,8 +275,14 @@ async fn frame_session(socket: WebSocket, hub: Shared) {
     while let Ok(Some(Ok(msg))) = tokio::time::timeout(FRAME_SILENCE, stream.next()).await {
         match msg {
             Message::Text(text) => {
-                if let Ok(value) = serde_json::from_str(text.as_str()) {
-                    hub.on_frame_msg(id, value);
+                match serde_json::from_str::<Value>(text.as_str()) {
+                    // The frame names the day it wants a painting for; `another` asks for a different one.
+                    Ok(value) if value["t"] == "want_art" => {
+                        let day = value["day"].as_str().unwrap_or("").to_owned();
+                        art::want(hub.clone(), day, value["another"] == true);
+                    }
+                    Ok(value) => hub.on_frame_msg(id, value),
+                    Err(_) => {}
                 }
             }
             Message::Close(_) => break,
@@ -297,6 +323,8 @@ async fn main() {
         .route("/ui/notify", post(ui::notify))
         .route("/ui/places/add", post(ui::place_add))
         .route("/ui/places/remove", post(ui::place_remove))
+        .route("/ui/projects", post(ui::project))
+        .route("/ui/art/another", post(ui::art_another))
         .route("/frame", get(frame_ws))
         .route("/api/notify", post(api_notify))
         .route("/api/state", get(api_state))
@@ -304,6 +332,8 @@ async fn main() {
         .route("/api/now_playing", post(nowplaying::post).layer(DefaultBodyLimit::max(12 << 20)))
         .route("/api/now_playing/commands", get(nowplaying::commands))
         .route("/art/{version}/{file}", get(nowplaying::art))
+        .route("/api/project", post(projects::post))
+        .route("/daily/{version}/{file}", get(art::file))
         .route("/mcp", post(mcp::handle))
         .with_state(hub.clone());
     tokio::spawn(nowplaying::expire_silent_helper(hub));

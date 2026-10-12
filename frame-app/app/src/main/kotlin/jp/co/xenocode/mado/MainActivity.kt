@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.util.Base64
@@ -13,6 +14,9 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.concurrent.thread
 
 class MainActivity : Activity(), HubLink.Listener {
@@ -20,9 +24,18 @@ class MainActivity : Activity(), HubLink.Listener {
     private lateinit var alerts: AlertView
     private lateinit var rail: RailView
     private lateinit var nowPlaying: NowPlayingView
+    private lateinit var dashboard: DashboardView
     private lateinit var scenes: List<View>
-    private var scene = CLOCK
+    private var scene = DASHBOARD
     private var artVersion = -1L
+    private var paintingVersion = -1L
+    private var paintingDay = ""
+    private val dayWatch = object : Runnable {
+        override fun run() {
+            askForPainting()
+            root.postDelayed(this, 60_000)
+        }
+    }
     private var playState = ""
     private val backHome = Runnable { showScene(HOME) }
     private var link: HubLink? = null
@@ -41,9 +54,13 @@ class MainActivity : Activity(), HubLink.Listener {
             onFullCover = { prefs().edit().putBoolean("full_cover", it).apply() }
             onPlayPause = { link?.send(JSONObject().put("t", "event").put("kind", "media").put("action", "playpause")) }
         }
-        scenes = listOf(ClockView(this), nowPlaying)
+        dashboard = DashboardView(this).apply {
+            layout = prefs().getInt("dashboard_layout", DashboardView.FULL_BLEED)
+            onLayoutChosen = { prefs().edit().putInt("dashboard_layout", it).apply() }
+        }
+        scenes = listOf(dashboard, nowPlaying)
         rail = RailView(this).apply {
-            scenes = listOf("Clock", "Now playing")
+            scenes = listOf("Dashboard", "Now playing")
             onScene = { index ->
                 showScene(index)
                 lingerOnNowPlaying()
@@ -64,6 +81,7 @@ class MainActivity : Activity(), HubLink.Listener {
         setContentView(root)
         adoptHubAddress(intent)
         connect()
+        root.postDelayed(dayWatch, 60_000)
     }
 
     // `am start ... --es hub ws://host:7878/frame` points the frame at a hub; it is remembered.
@@ -109,6 +127,65 @@ class MainActivity : Activity(), HubLink.Listener {
     override fun onHubLink(up: Boolean) {
         alerts.linkUp = up
         rail.linkUp = up
+        if (up) {
+            paintingDay = ""
+            askForPainting()
+        }
+    }
+
+    /** The frame owns the date: it asks the hub for a painting once per local day. */
+    private fun askForPainting() {
+        val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        // The clock reads 1970 for a while after boot, until NTP answers.
+        if (day == paintingDay || day < "2024") return
+        paintingDay = day
+        link?.send(JSONObject().put("t", "want_art").put("day", day))
+    }
+
+    private fun painting(msg: JSONObject) {
+        val version = msg.optLong("version")
+        if (version == paintingVersion) return
+        paintingVersion = version
+        val link = link ?: return
+        val palette = msg.optJSONObject("palette") ?: JSONObject()
+        // parseColor throws different exceptions for null, empty and malformed strings.
+        fun parse(hex: String?, fallback: Int) = try {
+            Color.parseColor(hex)
+        } catch (e: RuntimeException) {
+            fallback
+        }
+        fun color(name: String, fallback: Int) = parse(palette.optString(name), fallback)
+        val swatches = palette.optJSONArray("swatches")
+        link.fetch("/daily/$version/image.jpg") { imageBytes ->
+            link.fetch("/daily/$version/qr.png") { qrBytes ->
+                if (version == paintingVersion) {
+                    dashboard.setArt(
+                        DashboardView.Art(
+                            title = msg.optString("title"), artist = msg.optString("artist"), date = msg.optString("date"),
+                            medium = msg.optString("medium"), credit = msg.optString("credit"), text = msg.optString("text"),
+                            image = imageBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) },
+                            qr = qrBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) },
+                            ink = color("ink", Color.BLACK), paper = color("paper", Color.WHITE),
+                            wall = color("wall", Color.DKGRAY), accent = color("accent", Color.WHITE),
+                            swatches = IntArray(5) { i -> parse(swatches?.optString(i), Color.GRAY) },
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun projects(msg: JSONObject) {
+        val items = msg.optJSONArray("items") ?: return
+        dashboard.setProjects(
+            (0 until items.length()).map { i ->
+                val p = items.getJSONObject(i)
+                DashboardView.Project(
+                    p.optString("name"), p.optString("status"), p.optString("note"),
+                    if (p.isNull("progress")) null else p.optDouble("progress").toFloat(),
+                )
+            }
+        )
     }
 
     override fun onHubMessage(msg: JSONObject) {
@@ -123,6 +200,8 @@ class MainActivity : Activity(), HubLink.Listener {
                 )
             )
             "now_playing" -> nowPlaying(msg)
+            "art" -> painting(msg)
+            "projects" -> projects(msg)
             "look" -> look(msg.optLong("req"))
             // Kept for the scenes that will use it (weather places); nothing reads it yet.
             "config" -> prefs().edit().putString("config", msg.optJSONObject("config")?.toString()).apply()
@@ -222,10 +301,10 @@ class MainActivity : Activity(), HubLink.Listener {
     }
 
     private companion object {
-        const val CLOCK = 0
+        const val DASHBOARD = 0
         const val NOW_PLAYING = 1
-        /** Where the stage rests when nothing else wants it. The dashboard, once there is one. */
-        const val HOME = CLOCK
+        /** Where the stage rests when nothing else wants it. */
+        const val HOME = DASHBOARD
         const val SCENE_FADE_MS = 700L
         const val PAUSED_LINGER_MS = 120_000L
         const val STOPPED_LINGER_MS = 10_000L

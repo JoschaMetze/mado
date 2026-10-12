@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::{Notify, Place, Shared};
+use crate::{art, projects, Notify, Place, Shared};
 
 const STYLE: &str = r#"
 :root{--bg:#0d1217;--panel:#151c23;--fg:#e7edf2;--muted:#94a2b0;--line:#27323d;--accent:#ff7fa8;--ok:#4fd19c;--bad:#ff7b7b;color-scheme:dark}
@@ -99,6 +99,35 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap) -> Html<String
         .collect();
     let places = if places.is_empty() { r#"<li class="muted">No places yet.</li>"#.to_owned() } else { places };
 
+    let painting = match hub.art.lock().unwrap().as_ref() {
+        Some(a) => format!(
+            r#"<img class="glass" style="aspect-ratio:auto;max-height:260px;object-fit:contain" src="/daily/{}/image.jpg" alt="">
+            <p><i>{}</i><br><span class="muted">{} · {}</span></p>
+            <form method="post" action="/ui/art/another"><button>Another painting</button></form>"#,
+            a.version,
+            esc(a.meta["title"].as_str().unwrap_or("")),
+            esc(a.meta["artist"].as_str().unwrap_or("")),
+            esc(a.meta["date"].as_str().unwrap_or("")),
+        ),
+        None => r#"<p class="muted">The frame asks for a painting when it connects.</p>"#.to_owned(),
+    };
+
+    let project_rows: String = hub.projects_message()["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| {
+            let name = esc(p["name"].as_str().unwrap_or(""));
+            format!(
+                r#"<li><span><b>{name}</b> · {} <span class="muted">{}</span></span>
+                <form method="post" action="/ui/projects"><input type="hidden" name="name" value="{name}"><input type="hidden" name="status" value="archived"><button class="quiet">Remove</button></form></li>"#,
+                esc(&p["status"].as_str().unwrap_or("").replace('_', " ")),
+                esc(p["note"].as_str().unwrap_or("")),
+            )
+        })
+        .collect();
+    let project_rows = if project_rows.is_empty() { r#"<li class="muted">No projects yet. Agents add them with frame_project.</li>"#.to_owned() } else { project_rows };
+
     let log: String = hub
         .log
         .lock()
@@ -120,6 +149,18 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap) -> Html<String
       <label>Level<select name="level"><option>whisper</option><option selected>nudge</option><option>urgent</option></select></label>
       <label>From<input name="source" placeholder="you"></label>
       <button>Send to frame</button>
+    </form>
+  </section>
+</div>
+<div class="cols">
+  <section><h2>Art of the day</h2>{painting}</section>
+  <section><h2>Projects</h2>
+    <ul>{project_rows}</ul>
+    <form method="post" action="/ui/projects">
+      <label>Name<input name="name" maxlength="40" required></label>
+      <label>Status<select name="status"><option value="on_track">on track</option><option value="needs_you">needs you</option><option value="blocked">blocked</option><option value="done">done</option></select></label>
+      <label>Note<input name="note" maxlength="120"></label>
+      <button>Save project</button>
     </form>
   </section>
 </div>
@@ -148,6 +189,30 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap) -> Html<String
 pub async fn notify(State(hub): State<Shared>, Form(n): Form<Notify>) -> Redirect {
     if let Err(e) = hub.notify(n) {
         hub.log(format!("alert not sent: {e}"));
+    }
+    Redirect::to("/")
+}
+
+#[derive(Deserialize)]
+pub struct ProjectForm {
+    name: String,
+    status: String,
+    #[serde(default)]
+    note: String,
+}
+
+pub async fn project(State(hub): State<Shared>, Form(f): Form<ProjectForm>) -> Redirect {
+    let update = projects::Update { name: f.name, status: f.status, note: f.note, progress: None };
+    if let Err(e) = hub.update_project(update) {
+        hub.log(format!("project not saved: {e}"));
+    }
+    Redirect::to("/")
+}
+
+pub async fn art_another(State(hub): State<Shared>) -> Redirect {
+    let day = hub.art.lock().unwrap().as_ref().map(|a| a.day.clone());
+    if let Some(day) = day {
+        art::want(hub.clone(), day, true);
     }
     Redirect::to("/")
 }
