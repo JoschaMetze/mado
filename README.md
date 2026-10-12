@@ -130,6 +130,13 @@ The hub has no authentication. Run it where only your own devices can reach it, 
 bound to a [Tailscale](https://tailscale.com) address, and never expose it to the internet.
 The frame does not need to be on the tailnet; it only needs to reach the hub.
 
+If the frame sits on a network you would rather not open the whole hub to, set
+`MADO_FRAME_BIND` (for example `0.0.0.0:7879`). The hub then opens a second port that serves
+only the frame's socket and the images it fetches, and you can keep the main port, with the
+web page, API and MCP, somewhere private. Point the frame at the second port. Anything that
+can reach that port can pose as a frame and read what a frame is sent (alerts, projects,
+weather places), but cannot send or change anything.
+
 ## Hardware
 
 Developed on a Uhale 102KZ: Rockchip RK3126, Mali-400, 1 GB RAM, Android 6.0.1, 1280×800.

@@ -12,6 +12,7 @@ COPY --from=build /src/target/release/mado-hub /usr/local/bin/mado-hub
 # Config, projects and the painting cache live here; mount a volume to keep them.
 ENV MADO_DATA=/data MADO_BIND=0.0.0.0:7878
 VOLUME /data
-EXPOSE 7878
+# 7879 is only used when MADO_FRAME_BIND is set (a frame-only port).
+EXPOSE 7878 7879
 USER nobody
 CMD ["mado-hub"]

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Hub: `MADO_FRAME_BIND` opens a second port that serves only what a frame needs, so the
+  API, MCP and web page can stay on a private network.
+- Hub: exits promptly on SIGTERM, so `docker stop` no longer waits to kill it.
+
 ## 0.1.0
 
 First release.

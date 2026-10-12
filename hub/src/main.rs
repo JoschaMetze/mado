@@ -343,6 +343,12 @@ async fn main() {
     let bind = std::env::var("MADO_BIND").unwrap_or_else(|_| "0.0.0.0:7878".into());
     let hub: Shared = Arc::new(Hub::load(data_dir.into()));
 
+    // What a frame needs and nothing else: its socket and the images it fetches.
+    let frame_routes = Router::new()
+        .route("/frame", get(frame_ws))
+        .route("/art/{version}/{file}", get(nowplaying::art))
+        .route("/daily/{version}/{file}", get(art::file));
+
     let app = Router::new()
         .route("/", get(ui::index))
         .route("/ui/notify", post(ui::notify))
@@ -351,7 +357,6 @@ async fn main() {
         .route("/ui/places/rename", post(ui::place_rename))
         .route("/ui/projects", post(ui::project))
         .route("/ui/art/another", post(ui::art_another))
-        .route("/frame", get(frame_ws))
         .route("/api/notify", post(api_notify))
         .route("/api/state", get(api_state))
         .route("/api/look", get(api_look))
@@ -360,24 +365,51 @@ async fn main() {
             post(nowplaying::post).layer(DefaultBodyLimit::max(12 << 20)),
         )
         .route("/api/now_playing/commands", get(nowplaying::commands))
-        .route("/art/{version}/{file}", get(nowplaying::art))
         .route("/api/project", post(projects::post))
-        .route("/daily/{version}/{file}", get(art::file))
         .route("/mcp", post(mcp::handle))
+        .merge(frame_routes.clone())
         .with_state(hub.clone());
-    tokio::spawn(nowplaying::expire_silent_helper(hub));
+    tokio::spawn(nowplaying::expire_silent_helper(hub.clone()));
 
-    let listener = tokio::net::TcpListener::bind(&bind).await.unwrap_or_else(|e| {
+    // MADO_FRAME_BIND opens a second port that serves only the frame's routes. It lets the
+    // frame reach the hub on a network where the API, MCP and web page must not be exposed.
+    if let Ok(frame_bind) = std::env::var("MADO_FRAME_BIND") {
+        let listener = listen(&frame_bind).await;
+        println!("mado-hub listening for frames only on {frame_bind}");
+        let frame_app = frame_routes.with_state(hub);
+        tokio::spawn(async move { axum::serve(listener, frame_app).await });
+    }
+
+    let listener = listen(&bind).await;
+    println!("mado-hub listening on http://{bind}");
+    // Frames hold their socket open for good, so waiting for connections to drain would
+    // only mean waiting to be killed. Nothing here needs a slow goodbye.
+    tokio::spawn(async {
+        stop_signal().await;
+        std::process::exit(0);
+    });
+    axum::serve(listener, app).await.unwrap();
+}
+
+async fn listen(bind: &str) -> tokio::net::TcpListener {
+    tokio::net::TcpListener::bind(bind).await.unwrap_or_else(|e| {
         eprintln!("cannot listen on {bind}: {e}");
         std::process::exit(1);
-    });
-    println!("mado-hub listening on http://{bind}");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await
-        .unwrap();
+    })
+}
+
+/// Ctrl-C, or the SIGTERM a container runtime sends on stop.
+async fn stop_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 #[cfg(test)]
