@@ -91,7 +91,7 @@ curl -X POST http://HOST:7878/api/notify \
 
 | Endpoint | |
 |---|---|
-| `POST /api/notify` | `text`, optional `level` (`whisper`, `nudge`, `urgent`), `source`, `ttl_s` |
+| `POST /api/notify` | `text`, optional `level` (`whisper`, `nudge`, `urgent`), `source`, `ttl_s` (urgent ignores it and stays until tapped) |
 | `GET /api/look` | JPEG of what the frame is showing |
 | `GET /api/state` | Connected frames, now playing, config, recent activity |
 | `POST /api/project` | `name`, `status` (`on_track`, `needs_you`, `blocked`, `done`, `archived`), optional `note`, `progress` 0 to 1 |

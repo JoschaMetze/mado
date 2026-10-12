@@ -165,12 +165,12 @@ impl Hub {
         if !LEVELS.contains(&level) {
             return Err(format!("level must be one of {}", LEVELS.join(", ")));
         }
-        // Urgent stays until someone dismisses it on the frame.
-        let ttl_s = n.ttl_s.unwrap_or(match level {
-            "whisper" => 60,
-            "nudge" => 20,
-            _ => 0,
-        });
+        // Urgent stays until someone taps it on the frame, whatever the sender asked for.
+        let ttl_s = match level {
+            "urgent" => 0,
+            "whisper" => n.ttl_s.unwrap_or(60),
+            _ => n.ttl_s.unwrap_or(20),
+        };
         let source = n.source.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let id = self.id();
         let frames = self.send_all(&json!({

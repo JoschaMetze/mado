@@ -63,6 +63,7 @@ class DashboardView(context: Context) : View(context) {
     private val minute = SimpleDateFormat("mm", Locale.US)
     private val weekday = SimpleDateFormat("EEEE", Locale.US)
     private val dayMonth = SimpleDateFormat("d MMMM", Locale.US)
+    private val shortDate = SimpleDateFormat("EEE d MMM", Locale.US)
 
     private val thin = Typeface.create("sans-serif-thin", Typeface.NORMAL)
     private val heavy = Typeface.create("sans-serif-black", Typeface.NORMAL)
@@ -77,6 +78,7 @@ class DashboardView(context: Context) : View(context) {
     private val scrimTop = Paint()
     private val scrimBottom = Paint()
     private val src = Rect()
+    private val bounds = Rect()
     private val dst = RectF()
     private val rect = RectF()
     private val plaque = RectF()
@@ -272,9 +274,13 @@ class DashboardView(context: Context) : View(context) {
 
         val x = 716f
         val right = w - 70f
-        canvas.drawText(clock.format(now), x - 8f, 206f, type(176f, thin, art.paper, spacing = -0.02f))
+        val time = clock.format(now)
+        canvas.drawText(time, x - 8f, 206f, type(176f, thin, art.paper, spacing = -0.02f))
+        // The date is a caption to the time, so it spans the numerals, not the whole column.
+        text.getTextBounds(time, 0, time.length, bounds)
+        val timeRight = x - 8f + bounds.right
         canvas.drawText(weekday.format(now).uppercase(), x, 252f, mono(art.paper, 0.72f, 16f))
-        canvas.drawText(dayMonth.format(now).uppercase(), right, 252f, mono(art.paper, 0.72f, 16f, Paint.Align.RIGHT))
+        canvas.drawText(dayMonth.format(now).uppercase(), timeRight + 2f, 252f, mono(art.paper, 0.72f, 16f, Paint.Align.RIGHT))
         rule(canvas, x, right, 290f)
         weather?.let {
             canvas.drawText(fit(it.sentence + ".", type(34f, italic, art.paper), right - x), x, 346f, text)
@@ -311,8 +317,7 @@ class DashboardView(context: Context) : View(context) {
         val right = w - 44f
         canvas.drawText(hour.format(now), x - 10f, 206f, type(218f, heavy, art.accent, spacing = -0.05f))
         canvas.drawText(minute.format(now), x - 10f, 392f, type(218f, heavy, art.paper, spacing = -0.05f))
-        canvas.drawText(weekday.format(now).uppercase(), x, 438f, mono(art.paper, 0.7f, 16f))
-        canvas.drawText(dayMonth.format(now).uppercase(), right, 438f, mono(art.paper, 0.7f, 16f, Paint.Align.RIGHT))
+        canvas.drawText(shortDate.format(now).uppercase(), x, 438f, mono(art.paper, 0.7f, 16f))
         weather?.let {
             canvas.drawText(fit("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", type(23f, bold, art.paper), right - x), x, 480f, text)
             // There is room for one more line above four projects: the second place if there is one.

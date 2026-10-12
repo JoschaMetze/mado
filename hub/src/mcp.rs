@@ -69,7 +69,7 @@ fn tools() -> Value {
                     "text": { "type": "string", "description": "The message, at most 280 characters. Shorter reads better from across a room." },
                     "level": { "type": "string", "enum": ["whisper", "nudge", "urgent"], "default": "nudge" },
                     "source": { "type": "string", "description": "Who is speaking, shown above the message, e.g. your agent name." },
-                    "ttl_s": { "type": "integer", "minimum": 0, "description": "Seconds on screen. 0 means until dismissed. Defaults: whisper 60, nudge 20, urgent 0." }
+                    "ttl_s": { "type": "integer", "minimum": 0, "description": "Seconds on screen for a whisper (default 60) or nudge (default 20). Ignored for urgent, which always stays until the owner taps it." }
                 },
                 "required": ["text"]
             }
