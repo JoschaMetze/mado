@@ -78,7 +78,6 @@ class DashboardView(context: Context) : View(context) {
     private val scrimTop = Paint()
     private val scrimBottom = Paint()
     private val src = Rect()
-    private val bounds = Rect()
     private val dst = RectF()
     private val rect = RectF()
     private val plaque = RectF()
@@ -274,13 +273,8 @@ class DashboardView(context: Context) : View(context) {
 
         val x = 716f
         val right = w - 70f
-        val time = clock.format(now)
-        canvas.drawText(time, x - 8f, 206f, type(176f, thin, art.paper, spacing = -0.02f))
-        // The date is a caption to the time, so it spans the numerals, not the whole column.
-        text.getTextBounds(time, 0, time.length, bounds)
-        val timeRight = x - 8f + bounds.right
-        canvas.drawText(weekday.format(now).uppercase(), x, 252f, mono(art.paper, 0.72f, 16f))
-        canvas.drawText(dayMonth.format(now).uppercase(), timeRight + 2f, 252f, mono(art.paper, 0.72f, 16f, Paint.Align.RIGHT))
+        canvas.drawText(clock.format(now), x - 8f, 206f, type(176f, thin, art.paper, spacing = -0.02f))
+        canvas.drawText("${weekday.format(now)} · ${dayMonth.format(now)}".uppercase(), x, 252f, mono(art.paper, 0.72f, 16f))
         rule(canvas, x, right, 290f)
         weather?.let {
             canvas.drawText(fit(it.sentence + ".", type(34f, italic, art.paper), right - x), x, 346f, text)
