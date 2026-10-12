@@ -117,10 +117,16 @@ class DashboardView(context: Context) : View(context) {
     }
 
     /** The second place on one line, led by a small sun or moon for whether it is day there. */
-    private fun drawAway(canvas: Canvas, x: Float, y: Float, size: Float, color: Int, alpha: Float, align: Paint.Align, shadow: Boolean, maxWidth: Float) {
+    private fun drawAway(
+        canvas: Canvas, x: Float, y: Float, size: Float, color: Int, alpha: Float, align: Paint.Align, shadow: Boolean, maxWidth: Float,
+        /** Left-aligned rows only: name and time stay left, temperature and forecast go to the right edge. */
+        spread: Boolean = false,
+    ) {
         val place = away ?: return
-        val line = fit(awayLine() ?: return, type(size, sans, color, alpha, shadow = shadow), maxWidth - SKY_W)
-        val width = text.measureText(line) + SKY_W
+        val where = "${place.place} ${awayClock.format(now)}"
+        val what = "${place.tempC}° · ${place.sentence.replaceFirstChar(Char::lowercase)}"
+        val line = if (spread) where else fit(awayLine() ?: return, type(size, sans, color, alpha, shadow = shadow), maxWidth - SKY_W)
+        val width = type(size, sans, color, alpha, shadow = shadow).measureText(line) + SKY_W
         val left = when (align) {
             Paint.Align.RIGHT -> x - width
             Paint.Align.CENTER -> x - width / 2
@@ -146,7 +152,11 @@ class DashboardView(context: Context) : View(context) {
             moon.op(bite, Path.Op.DIFFERENCE)
             canvas.drawPath(moon, fill)
         }
-        canvas.drawText(line, left + SKY_W, y, text)
+        canvas.drawText(line, left + SKY_W, y, type(size, sans, color, alpha, shadow = shadow))
+        if (spread) {
+            val room = maxWidth - width - 24f
+            canvas.drawText(fit(what, text, room), x + maxWidth, y, type(size, sans, color, alpha, align = Paint.Align.RIGHT, shadow = shadow))
+        }
     }
 
     fun setProjects(projects: List<Project>) {
@@ -271,7 +281,7 @@ class DashboardView(context: Context) : View(context) {
             canvas.drawText(fit(it.detail, type(17f, sans, art.paper, 0.72f), right - x), x, 378f, text)
             rule(canvas, x, right, 402f)
             if (away != null) {
-                drawAway(canvas, x, 431f, 17f, art.paper, 0.72f, Paint.Align.LEFT, false, right - x)
+                drawAway(canvas, x, 431f, 17f, art.paper, 0.72f, Paint.Align.LEFT, false, right - x, spread = true)
                 rule(canvas, x, right, 448f)
             }
         }
@@ -307,7 +317,7 @@ class DashboardView(context: Context) : View(context) {
             // There is room for one more line above four projects: the second place if there is one.
             if (away != null) {
                 hairline(canvas, x, right, 493f, art.paper, 0.2f)
-                drawAway(canvas, x, 514f, 16f, art.paper, 0.7f, Paint.Align.LEFT, false, right - x)
+                drawAway(canvas, x, 514f, 16f, art.paper, 0.7f, Paint.Align.LEFT, false, right - x, spread = true)
             } else {
                 canvas.drawText(fit("${it.highC}° high" + if (it.sunset.isEmpty()) "" else " · sunset ${it.sunset}", type(16f, sans, art.paper, 0.7f), right - x), x, 506f, text)
             }
