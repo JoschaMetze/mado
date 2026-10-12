@@ -7,6 +7,10 @@
   from the command line with XcodeGen. Scripts for Developer ID signing and notarization.
 - Hub: `MADO_FRAME_BIND` opens a second port that serves only what a frame needs, so the
   API, MCP and web page can stay on a private network.
+- Hub: the web page is redesigned around a live picture of the frame, which refreshes
+  itself every 30 seconds. Alert levels are shown as pictures, projects can be edited and
+  given progress, any place can be made "here", now playing and the painting's story and
+  palette are shown, and every form says what it did. Still server-rendered with no script.
 - Hub: exits promptly on SIGTERM, so `docker stop` no longer waits to kill it.
 
 ## 0.1.0

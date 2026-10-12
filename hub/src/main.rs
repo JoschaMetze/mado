@@ -351,10 +351,12 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(ui::index))
+        .route("/ui/glass", get(ui::glass))
         .route("/ui/notify", post(ui::notify))
         .route("/ui/places/add", post(ui::place_add))
         .route("/ui/places/remove", post(ui::place_remove))
         .route("/ui/places/rename", post(ui::place_rename))
+        .route("/ui/places/here", post(ui::place_here))
         .route("/ui/projects", post(ui::project))
         .route("/ui/art/another", post(ui::art_another))
         .route("/api/notify", post(api_notify))

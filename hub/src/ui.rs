@@ -1,48 +1,22 @@
 //! The web interface: status, a test alert, and all configuration. Server-rendered, no script.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use axum::{
     extract::{Query, State},
-    http::{header::HOST, HeaderMap},
+    http::HeaderMap,
     response::{Html, Redirect},
     Form,
 };
+use base64::Engine;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{art, projects, Notify, Place, Shared};
 
-const STYLE: &str = r#"
-:root{--bg:#0d1217;--panel:#151c23;--fg:#e7edf2;--muted:#94a2b0;--line:#27323d;--accent:#ff7fa8;--ok:#4fd19c;--bad:#ff7b7b;color-scheme:dark}
-@media (prefers-color-scheme:light){:root{--bg:#edf0f3;--panel:#fff;--fg:#15202b;--muted:#5b6876;--line:#d3dae1;--accent:#c2376b;--ok:#1f9d6b;--bad:#d24b4b;color-scheme:light}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
-main{max-width:980px;margin:0 auto;padding:32px 20px 80px;display:grid;gap:28px}
-header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
-h1{margin:0;font-size:2.2rem;letter-spacing:-.02em}
-h2{margin:0 0 12px;font-size:1.05rem}
-.tag{font:500 .75rem ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:28px}
-section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;min-width:0}
-.glass{display:block;width:100%;aspect-ratio:16/10;background:#000;border-radius:6px;border:6px solid #05070a;object-fit:cover;color:var(--muted)}
-.dot{display:inline-block;width:.6em;height:.6em;border-radius:50%;margin-right:.5em;background:var(--bad)}
-.dot.up{background:var(--ok)}
-form{display:grid;gap:10px}
-label{display:grid;gap:4px;font-size:.85rem;color:var(--muted)}
-input,select,button{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:0}
-button{cursor:pointer;background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600;justify-self:start}
-button.quiet{background:transparent;color:var(--muted);border-color:var(--line);font-weight:400;padding:2px 8px}
-.row{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px}
-ul{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:6px}
-li{display:flex;gap:10px;align-items:center;justify-content:space-between}
-li form{display:inline}
-li form.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
-li form.inline input[name=name]{width:11em;padding:4px 8px}
-.log li{justify-content:flex-start;font-size:.9rem}
-.log span,.muted{color:var(--muted)}
-.log span{flex:none;width:5.5em;font-variant-numeric:tabular-nums}
-summary{cursor:pointer;margin:14px 0 10px}
-code{font:.85em ui-monospace,Menlo,monospace;background:var(--bg);padding:.15em .4em;border-radius:4px;overflow-wrap:anywhere}
-"#;
+const STYLE: &str = include_str!("ui.css");
+/// How often the picture of the glass reloads itself. Each reload asks the frame for a screenshot.
+const GLASS_REFRESH_S: u32 = 30;
 
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -55,13 +29,73 @@ fn ago(secs: u64) -> String {
     match secs {
         0..=59 => format!("{secs}s ago"),
         60..=3599 => format!("{}m ago", secs / 60),
-        _ => format!("{}h ago", secs / 3600),
+        3600..=172_799 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86_400),
+    }
+}
+
+fn clock(secs: f64) -> String {
+    let secs = secs.max(0.0) as u64;
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// A colour from the painting's palette, or the fallback if it is not a plain `#rrggbb`.
+fn colour<'a>(v: &'a Value, fallback: &'a str) -> &'a str {
+    v.as_str()
+        .filter(|s| s.len() == 7 && s.starts_with('#') && s[1..].bytes().all(|b| b.is_ascii_hexdigit()))
+        .unwrap_or(fallback)
+}
+
+/// Where a form post sends the browser: back to the page, scrolled to the card that was
+/// used, with a line saying what happened.
+fn back_url(card: &str, outcome: Result<&str, String>) -> String {
+    let (key, text) = match &outcome {
+        Ok(text) => ("ok", *text),
+        Err(text) => ("err", text.as_str()),
+    };
+    let mut url = format!("/?{key}=");
+    for b in text.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => url.push(b as char),
+            _ => url.push_str(&format!("%{b:02X}")),
+        }
+    }
+    format!("{url}#{card}")
+}
+
+fn back(card: &str, outcome: Result<&str, String>) -> Redirect {
+    Redirect::to(&back_url(card, outcome))
+}
+
+/// Which coloured dot a log line gets.
+fn log_kind(line: &str) -> &'static str {
+    let starts = |p: &str| line.starts_with(p);
+    if line.contains(" failed") || line.contains(" not ") {
+        "bad"
+    } else if starts("urgent ") {
+        "urgent"
+    } else if starts("nudge ") {
+        "nudge"
+    } else if starts("whisper ") {
+        "whisper"
+    } else if starts("frame ") {
+        "frame"
+    } else if starts("project ") {
+        "project"
+    } else if starts("now playing") {
+        "music"
+    } else if starts("art ") {
+        "art"
+    } else {
+        "other"
     }
 }
 
 #[derive(Deserialize)]
 pub struct Search {
     city: Option<String>,
+    ok: Option<String>,
+    err: Option<String>,
 }
 
 /// Look a city up by name with Open-Meteo's geocoder (free, no key).
@@ -79,11 +113,204 @@ fn find_cities(name: &str) -> Result<Vec<Value>, String> {
     Ok(found["results"].as_array().cloned().unwrap_or_default())
 }
 
+async fn city_matches(name: String) -> String {
+    match tokio::task::spawn_blocking(move || find_cities(&name)).await {
+        Ok(Ok(found)) if found.is_empty() => {
+            r#"<p class="muted">No city by that name. Try a different spelling.</p>"#.to_owned()
+        }
+        Ok(Ok(found)) => {
+            let rows: String = found
+                .iter()
+                .map(|c| {
+                    let name = c["name"].as_str().unwrap_or("");
+                    let region: Vec<&str> = [c["admin1"].as_str(), c["country"].as_str()]
+                        .into_iter()
+                        .flatten()
+                        .filter(|s| *s != name)
+                        .collect();
+                    format!(
+                        r#"<li><span><b>{}</b> <span class="muted">{}</span></span>
+<form method="post" action="/ui/places/add"><input type="hidden" name="name" value="{}"><input type="hidden" name="lat" value="{}"><input type="hidden" name="lon" value="{}"><input type="hidden" name="timezone" value="{}"><button>Add</button></form></li>"#,
+                        esc(name),
+                        esc(&region.join(", ")),
+                        esc(name),
+                        c["latitude"].as_f64().unwrap_or(0.0),
+                        c["longitude"].as_f64().unwrap_or(0.0),
+                        esc(c["timezone"].as_str().unwrap_or("")),
+                    )
+                })
+                .collect();
+            format!(r#"<ul class="found">{rows}</ul>"#)
+        }
+        _ => r#"<p class="muted">The city search is unreachable right now. You can still add a place by coordinates.</p>"#
+            .to_owned(),
+    }
+}
+
+fn status_options(selected: &str) -> String {
+    projects::STATUSES
+        .iter()
+        .map(|s| {
+            format!(
+                r#"<option value="{s}"{}>{}</option>"#,
+                if *s == selected { " selected" } else { "" },
+                s.replace('_', " ")
+            )
+        })
+        .collect()
+}
+
+fn project_rows(items: &Value) -> String {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let rows: String = items
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| {
+            let name = esc(p["name"].as_str().unwrap_or(""));
+            let status = p["status"].as_str().unwrap_or("");
+            let note = esc(p["note"].as_str().unwrap_or(""));
+            let percent = p["progress"].as_f64().map(|f| (f * 100.0).round());
+            let bar = percent.map_or(String::new(), |pc| {
+                format!(r#"<div class="bar" title="{pc}%"><i style="width:{pc}%"></i></div>"#)
+            });
+            let note_line = if note.is_empty() {
+                String::new()
+            } else {
+                format!(r#"<p class="muted">{note}</p>"#)
+            };
+            format!(
+                r#"<li class="project"><div class="line"><b class="grow">{name}</b><span class="badge {class}">{label}</span></div>
+{note_line}{bar}
+<details><summary>Updated {updated} · edit</summary><form method="post" action="/ui/projects"><input type="hidden" name="name" value="{name}">
+<div class="row"><label>Status<select name="status">{options}</select></label>
+<label>Progress, %<input name="progress" type="number" min="0" max="100" value="{percent}" placeholder="none"></label></div>
+<label>Note<input name="note" maxlength="120" value="{note}"></label>
+<div class="actions"><button>Save</button><button class="quiet" name="remove" value="yes">Remove from the dashboard</button></div></form></details></li>"#,
+                class = if projects::STATUSES.contains(&status) { status } else { "plain" },
+                label = esc(&status.replace('_', " ")),
+                updated = ago(now.saturating_sub(p["updated"].as_u64().unwrap_or(now))),
+                options = status_options(status),
+                percent = percent.map_or(String::new(), |pc| pc.to_string()),
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        r#"<li class="muted">No projects yet. Agents add them with <code>frame_project</code>.</li>"#.to_owned()
+    } else {
+        rows
+    }
+}
+
+fn place_rows(places: &[Place]) -> String {
+    let rows: String = places
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let role = if i == 0 {
+                r#"<span class="badge needs_you">here</span>"#.to_owned()
+            } else {
+                format!(
+                    r#"<form method="post" action="/ui/places/here"><input type="hidden" name="index" value="{i}"><button class="quiet">Make this here</button></form>"#
+                )
+            };
+            format!(
+                r#"<li><div class="line"><form class="rename" method="post" action="/ui/places/rename"><input type="hidden" name="index" value="{i}">
+<input name="name" value="{}" maxlength="40" required aria-label="Name shown on the frame"><button class="quiet">Rename</button></form>{role}</div>
+<div class="line"><span class="muted small grow">{:.2}, {:.2}{}</span>
+<form method="post" action="/ui/places/remove"><input type="hidden" name="index" value="{i}"><button class="quiet">Remove</button></form></div></li>"#,
+                esc(&p.name),
+                p.lat,
+                p.lon,
+                p.timezone.as_deref().map_or(String::new(), |tz| format!(" · {}", esc(tz))),
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        r#"<li class="muted">No places yet. Find a city below.</li>"#.to_owned()
+    } else {
+        rows
+    }
+}
+
+fn now_playing_card(np: &Value) -> String {
+    let title = np["title"].as_str().unwrap_or("");
+    if np["state"] == "stopped" || title.is_empty() {
+        return String::new();
+    }
+    let (backdrop, cover) = match np["art"].as_u64() {
+        Some(v) => (
+            format!(r#"<img class="back" src="/art/{v}/backdrop.png" alt="">"#),
+            format!(r#"<img class="cover" src="/art/{v}/cover.jpg" alt="">"#),
+        ),
+        None => (String::new(), r#"<div class="cover"></div>"#.to_owned()),
+    };
+    let (position, duration) = (
+        np["position_s"].as_f64().unwrap_or(0.0),
+        np["duration_s"].as_f64().unwrap_or(0.0),
+    );
+    let progress = if duration > 0.0 {
+        format!(
+            r#"<div class="bar" title="{} of {}"><i style="width:{:.1}%"></i></div>"#,
+            clock(position),
+            clock(duration),
+            (position / duration * 100.0).clamp(0.0, 100.0)
+        )
+    } else {
+        String::new()
+    };
+    let source = np["source"].as_str().filter(|s| !s.is_empty());
+    format!(
+        r#"<section class="np">{backdrop}{cover}<div><p class="eyebrow">{}{}</p><h3>{}</h3><p>{}</p>{progress}</div></section>"#,
+        esc(np["state"].as_str().unwrap_or("")),
+        source.map_or(String::new(), |s| format!(" · {}", esc(s))),
+        esc(title),
+        esc(np["artist"].as_str().unwrap_or("")),
+    )
+}
+
+fn painting_card(art: &Value) -> String {
+    if art.is_null() {
+        return r#"<p class="muted wide">The frame asks for a painting when it connects. Nothing has been asked for yet.</p>"#
+            .to_owned();
+    }
+    let palette = &art["palette"];
+    let swatches: String = palette["swatches"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| format!(r#"<i style="background:{}"></i>"#, colour(s, "#888888")))
+        .collect();
+    let facts: Vec<&str> = ["artist", "date", "medium"]
+        .iter()
+        .filter_map(|k| art[*k].as_str().filter(|s| !s.is_empty()))
+        .collect();
+    format!(
+        r#"<div class="canvas" style="--wall:{wall}"><img src="/daily/{version}/image.jpg" alt="{title}"></div>
+<div class="about"><div class="head"><p class="eyebrow">Art of the day · {day}</p><h3>{title}</h3><p class="muted">{facts}</p></div>
+<p>{text}</p>
+<div class="swatches" title="The colours the dashboard takes from this painting">{swatches}</div>
+<div class="actions"><form method="post" action="/ui/art/another"><button>Another painting</button></form>
+<a href="{url}" rel="noreferrer">{credit}</a></div></div>"#,
+        wall = colour(&palette["wall"], "#2a2f36"),
+        version = art["version"].as_u64().unwrap_or(0),
+        day = esc(art["day"].as_str().unwrap_or("")),
+        title = esc(art["title"].as_str().unwrap_or("")),
+        facts = esc(&facts.join(" · ")),
+        text = esc(art["text"].as_str().unwrap_or("")),
+        url = esc(art["url"]
+            .as_str()
+            .filter(|u| u.starts_with("https://"))
+            .unwrap_or("https://www.artic.edu")),
+        credit = esc(art["credit"].as_str().unwrap_or("Art Institute of Chicago")),
+    )
+}
+
 pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search): Query<Search>) -> Html<String> {
-    let host = headers
-        .get(HOST)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("HUB_ADDRESS:7878");
+    let header = |name: &str| headers.get(name).and_then(|h| h.to_str().ok());
+    let host = header("host").unwrap_or("HUB_ADDRESS:7878");
+    // Behind a reverse proxy the page is usually https; say so in the addresses it prints.
+    let scheme = header("x-forwarded-proto").filter(|p| *p == "https").unwrap_or("http");
 
     let city = search
         .city
@@ -92,113 +319,52 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
         .filter(|c| !c.is_empty())
         .map(str::to_owned);
     let matches = match city.clone() {
+        Some(name) => city_matches(name).await,
         None => String::new(),
-        Some(name) => match tokio::task::spawn_blocking(move || find_cities(&name)).await {
-            Ok(Ok(found)) if found.is_empty() => r#"<p class="muted">No city by that name. Try a different spelling.</p>"#.to_owned(),
-            Ok(Ok(found)) => {
-                let rows: String = found
-                    .iter()
-                    .map(|c| {
-                        let name = c["name"].as_str().unwrap_or("");
-                        let region: Vec<&str> = [c["admin1"].as_str(), c["country"].as_str()].into_iter().flatten().filter(|s| *s != name).collect();
-                        format!(
-                            r#"<li><span>{} <span class="muted">{}</span></span>
-                            <form method="post" action="/ui/places/add"><input type="hidden" name="name" value="{}"><input type="hidden" name="lat" value="{}"><input type="hidden" name="lon" value="{}"><input type="hidden" name="timezone" value="{}"><button>Add</button></form></li>"#,
-                            esc(name), esc(&region.join(", ")), esc(name),
-                            c["latitude"].as_f64().unwrap_or(0.0), c["longitude"].as_f64().unwrap_or(0.0),
-                            esc(c["timezone"].as_str().unwrap_or("")),
-                        )
-                    })
-                    .collect();
-                format!("<ul>{rows}</ul>")
-            }
-            _ => r#"<p class="muted">The city search is unreachable right now. You can still add a place by coordinates.</p>"#.to_owned(),
-        },
+    };
+    let flash = match (&search.ok, &search.err) {
+        (_, Some(e)) => format!(r#"<p class="flash err" role="alert">{}</p>"#, esc(e)),
+        (Some(ok), _) => format!(r#"<p class="flash" role="status">{}</p>"#, esc(ok)),
+        _ => String::new(),
     };
 
-    let frames = hub.frames.lock().unwrap();
-    let status = if frames.is_empty() {
-        format!(
-            r#"<p><i class="dot"></i>No frame connected.</p>
-            <p class="muted">Point the frame at this hub once, over USB:</p>
-            <p><code>adb shell am start -n jp.co.xenocode.mado/.MainActivity --es hub ws://{}/frame</code></p>"#,
-            esc(host)
-        )
-    } else {
-        frames
-            .values()
-            .map(|f| {
+    let (pill, glass_note) = {
+        let frames = hub.frames.lock().unwrap();
+        match frames.values().next() {
+            Some(f) => (
                 format!(
-                    r#"<p><i class="dot up"></i>{} · connected {}</p>"#,
+                    r#"<span class="pill up"><i class="dot"></i>{} · connected {}{}</span>"#,
                     esc(f.hello["model"].as_str().unwrap_or("Frame")),
-                    ago(f.since.elapsed().as_secs())
-                )
-            })
-            .collect()
-    };
-    let glass = if frames.is_empty() {
-        r#"<div class="glass"></div>"#.to_owned()
-    } else {
-        r#"<img class="glass" src="/api/look" alt="What the frame is showing now"><p><a href="/">Refresh</a></p>"#
-            .to_owned()
-    };
-    drop(frames);
-
-    let places: String = hub
-        .config
-        .read()
-        .unwrap()
-        .places
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            format!(
-                r#"<li><form class="inline" method="post" action="/ui/places/rename"><input type="hidden" name="index" value="{i}">
-                <input name="name" value="{}" maxlength="40" required aria-label="Name shown on the frame"><button class="quiet">Rename</button>{}
-                <span class="muted">{:.2}, {:.2}</span></form>
-                <form method="post" action="/ui/places/remove"><input type="hidden" name="index" value="{i}"><button class="quiet">Remove</button></form></li>"#,
-                esc(&p.name), if i == 0 { r#" <span class="tag">here</span>"# } else { "" }, p.lat, p.lon
-            )
-        })
-        .collect();
-    let places = if places.is_empty() {
-        r#"<li class="muted">No places yet.</li>"#.to_owned()
-    } else {
-        places
+                    ago(f.since.elapsed().as_secs()),
+                    if frames.len() > 1 {
+                        format!(" · {} frames", frames.len())
+                    } else {
+                        String::new()
+                    },
+                ),
+                format!(
+                    r#"<span>What the frame is showing, refreshed every {GLASS_REFRESH_S} seconds.</span><a href="/api/look">Full size</a>"#
+                ),
+            ),
+            None => (
+                r#"<span class="pill"><i class="dot"></i>No frame connected</span>"#.to_owned(),
+                r##"<span>Waiting for a frame. <a href="#connect">How to point one at this hub</a></span>"##.to_owned(),
+            ),
+        }
     };
 
-    let painting = match hub.art.lock().unwrap().as_ref() {
-        Some(a) => format!(
-            r#"<img class="glass" style="aspect-ratio:auto;max-height:260px;object-fit:contain" src="/daily/{}/image.jpg" alt="">
-            <p><i>{}</i><br><span class="muted">{} · {}</span></p>
-            <form method="post" action="/ui/art/another"><button>Another painting</button></form>"#,
-            a.version,
-            esc(a.meta["title"].as_str().unwrap_or("")),
-            esc(a.meta["artist"].as_str().unwrap_or("")),
-            esc(a.meta["date"].as_str().unwrap_or("")),
-        ),
-        None => r#"<p class="muted">The frame asks for a painting when it connects.</p>"#.to_owned(),
-    };
-
-    let project_rows: String = hub.projects_message()["items"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|p| {
-            let name = esc(p["name"].as_str().unwrap_or(""));
-            format!(
-                r#"<li><span><b>{name}</b> · {} <span class="muted">{}</span></span>
-                <form method="post" action="/ui/projects"><input type="hidden" name="name" value="{name}"><input type="hidden" name="status" value="archived"><button class="quiet">Remove</button></form></li>"#,
-                esc(&p["status"].as_str().unwrap_or("").replace('_', " ")),
-                esc(p["note"].as_str().unwrap_or("")),
-            )
-        })
-        .collect();
-    let project_rows = if project_rows.is_empty() {
-        r#"<li class="muted">No projects yet. Agents add them with frame_project.</li>"#.to_owned()
-    } else {
-        project_rows
-    };
+    let places = place_rows(&hub.config.read().unwrap().places);
+    let state = hub.state();
+    let np = now_playing_card(&state["now_playing"]);
+    let projects = project_rows(&state["projects"]);
+    let painting = painting_card(&state["art"]);
+    let palette = &state["art"]["palette"];
+    let tint = format!(
+        "--p1:{};--p2:{};--p3:{}",
+        colour(&palette["accent"], "#c2376b"),
+        colour(&palette["swatches"][1], "#5b6876"),
+        colour(&palette["swatches"][2], "#1f9d6b"),
+    );
 
     let log: String = hub
         .log
@@ -207,76 +373,119 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
         .iter()
         .map(|e| {
             format!(
-                "<li><span>{}</span>{}</li>",
+                r#"<li class="k-{}"><i class="dot"></i><time>{}</time><span>{}</span></li>"#,
+                log_kind(&e.line),
                 ago(e.at.elapsed().as_secs()),
                 esc(&e.line)
             )
         })
         .collect();
+    let log = if log.is_empty() {
+        r#"<li class="muted">Nothing has happened since the hub started.</li>"#.to_owned()
+    } else {
+        log
+    };
 
     Html(format!(
-        r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        r##"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mado hub</title><style>{STYLE}</style>
+<body style="{tint}"><div class="wash"></div>
 <main>
-<header><h1>Mado</h1><span class="tag">hub · {version}</span></header>
-<div class="cols">
-  <section><h2>On the glass</h2>{glass}{status}</section>
-  <section><h2>Send an alert</h2>
-    <form method="post" action="/ui/notify">
-      <label>Message<input name="text" maxlength="280" required placeholder="Kettle's boiled"></label>
-      <label>Level<select name="level"><option>whisper</option><option selected>nudge</option><option>urgent</option></select></label>
-      <label>From<input name="source" placeholder="you"></label>
-      <button>Send to frame</button>
-    </form>
-  </section>
+<header class="top"><a class="brand" href="/"><b lang="ja" aria-hidden="true">窓</b><h1>Mado</h1></a><span class="tag">hub · {version}</span><span class="grow"></span>{pill}</header>
+{flash}
+<div class="hero">
+  <div class="stage">
+    <div class="device"><iframe src="/ui/glass" title="What the frame is showing now"></iframe></div>
+    <p class="caption muted small">{glass_note}</p>
+  </div>
+  <div class="side">
+    <section id="alert"><div class="head"><p class="eyebrow">Say something</p><h2>Send an alert</h2></div>
+      <form method="post" action="/ui/notify">
+        <label>Message<textarea name="text" maxlength="280" required placeholder="Kettle's boiled"></textarea></label>
+        <fieldset class="levels"><legend>How loudly</legend>
+          <label class="whisper"><input type="radio" name="level" value="whisper"><span><i></i>Whisper<small>a bead at the edge</small></span></label>
+          <label class="nudge"><input type="radio" name="level" value="nudge" checked><span><i></i>Nudge<small>one line, then gone</small></span></label>
+          <label class="urgent"><input type="radio" name="level" value="urgent"><span><i></i>Urgent<small>stays until tapped</small></span></label>
+        </fieldset>
+        <label>From<input name="source" maxlength="40" placeholder="you"></label>
+        <button>Send to the frame</button>
+      </form>
+    </section>
+    {np}
+  </div>
 </div>
-<div class="cols">
-  <section><h2>Art of the day</h2>{painting}</section>
-  <section><h2>Projects</h2>
-    <ul>{project_rows}</ul>
+<div class="grid">
+  <section class="art wide" id="art">{painting}</section>
+  <section id="projects"><div class="head"><p class="eyebrow">On the dashboard</p><h2>Projects</h2></div>
+    <ul class="rows">{projects}</ul>
+    <details><summary>Add a project</summary>
     <form method="post" action="/ui/projects">
-      <label>Name<input name="name" maxlength="40" required></label>
-      <label>Status<select name="status"><option value="on_track">on track</option><option value="needs_you">needs you</option><option value="blocked">blocked</option><option value="done">done</option></select></label>
+      <div class="row"><label>Name<input name="name" maxlength="40" required></label>
+      <label>Status<select name="status">{statuses}</select></label></div>
       <label>Note<input name="note" maxlength="120"></label>
-      <button>Save project</button>
-    </form>
+      <button>Add project</button>
+    </form></details>
   </section>
-</div>
-<div class="cols">
-  <section><h2>Weather places</h2>
-    <ul>{places}</ul>
-    <form method="get" action="/">
+  <section id="places"><div class="head"><p class="eyebrow">Weather</p><h2>Places</h2></div>
+    <ul class="rows">{places}</ul>
+    <form method="get" action="/#places">
       <label>Find a city<input name="city" value="{city}" required placeholder="Kamakura"></label>
       <button>Search</button>
     </form>
     {matches}
-    <details><summary class="muted">Add by coordinates instead</summary>
+    <details><summary>Add by coordinates instead</summary>
     <form method="post" action="/ui/places/add">
+      <label>Name<input name="name" maxlength="40" required placeholder="Mum &amp; Dad"></label>
       <div class="row">
-        <label>Name<input name="name" required placeholder="Mum &amp; Dad"></label>
         <label>Latitude<input name="lat" type="number" step="any" min="-90" max="90" required></label>
         <label>Longitude<input name="lon" type="number" step="any" min="-180" max="180" required></label>
       </div>
       <button>Add place</button>
     </form></details>
-    <p class="muted">The first place is "here" on the dashboard. The frame fetches the forecast itself.</p>
+    <p class="muted small">"Here" gets the full forecast on the dashboard; the others get a line each with their local time. The frame fetches the weather itself.</p>
   </section>
-  <section><h2>Recent</h2><ul class="log">{log}</ul>
-    <p class="muted">Agents connect to <code>http://{host}/mcp</code></p>
+  <section id="recent"><div class="head"><p class="eyebrow">Since the hub started</p><h2>Recent</h2></div>
+    <ul class="log">{log}</ul>
+  </section>
+  <section id="connect"><div class="head"><p class="eyebrow">Plug things in</p><h2>Connect</h2></div>
+    <p>Agents speak MCP at <code>{scheme}://{host}/mcp</code></p>
+    <label>Anything with curl<pre>curl {scheme}://{host}/api/notify \
+  -H 'content-type: application/json' \
+  -d '{{"text":"Deploy finished","level":"nudge","source":"ci"}}'</pre></label>
+    <label>Point a frame at this hub, once, over USB<pre>adb shell am start -n jp.co.xenocode.mado/.MainActivity \
+  --es hub ws://HUB_ADDRESS:PORT/frame</pre></label>
+    <p class="muted small">The frame needs an address it can reach on its own network, which may differ from the one in your browser. State as JSON: <a href="/api/state">/api/state</a></p>
   </section>
 </div>
-</main></html>"#,
+</main></body></html>"##,
         version = env!("CARGO_PKG_VERSION"),
         host = esc(host),
         city = esc(city.as_deref().unwrap_or("")),
+        statuses = status_options("on_track"),
+    ))
+}
+
+/// The picture inside the frame on the page. It is its own small document so it can reload
+/// on a timer without a script and without disturbing a form someone is filling in.
+pub async fn glass(State(hub): State<Shared>) -> Html<String> {
+    let body = match hub.look().await {
+        Ok(jpeg) => format!(
+            r#"<img src="data:image/jpeg;base64,{}" alt="What the frame is showing now">"#,
+            base64::engine::general_purpose::STANDARD.encode(jpeg)
+        ),
+        Err(e) => format!(r#"<p><b lang="ja">窓</b>{}</p>"#, esc(&e)),
+    };
+    Html(format!(
+        r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta http-equiv="refresh" content="{GLASS_REFRESH_S}"><title>The glass</title>
+<style>html,body{{height:100%;margin:0;background:#000;color:#5b6876;font:14px system-ui,sans-serif;overflow:hidden}}
+img{{display:block;width:100%;height:100%;object-fit:cover}}
+p{{height:100%;margin:0;display:grid;place-content:center;justify-items:center;gap:10px;text-align:center}}
+b{{font-size:64px;line-height:1;font-weight:400;color:#27323d}}</style>{body}</html>"#
     ))
 }
 
 pub async fn notify(State(hub): State<Shared>, Form(n): Form<Notify>) -> Redirect {
-    if let Err(e) = hub.notify(n) {
-        hub.log(format!("alert not sent: {e}"));
-    }
-    Redirect::to("/")
+    back("alert", hub.notify(n).map(|_| "Sent to the frame."))
 }
 
 #[derive(Deserialize)]
@@ -285,42 +494,54 @@ pub struct ProjectForm {
     status: String,
     #[serde(default)]
     note: String,
+    /// A percentage; empty means the project has no progress bar.
+    #[serde(default)]
+    progress: String,
+    /// Set by the Remove button, which shares a form with Save.
+    remove: Option<String>,
 }
 
 pub async fn project(State(hub): State<Shared>, Form(f): Form<ProjectForm>) -> Redirect {
+    let (status, done) = match f.remove {
+        Some(_) => (projects::ARCHIVED.to_owned(), "Project removed."),
+        None => (f.status, "Project saved."),
+    };
     let update = projects::Update {
         name: f.name,
-        status: f.status,
+        status,
         note: f.note,
-        progress: None,
+        progress: f.progress.trim().parse::<f64>().ok().map(|percent| percent / 100.0),
     };
-    if let Err(e) = hub.update_project(update) {
-        hub.log(format!("project not saved: {e}"));
-    }
-    Redirect::to("/")
+    back("projects", hub.update_project(update).map(|_| done))
 }
 
 pub async fn art_another(State(hub): State<Shared>) -> Redirect {
     let day = hub.art.lock().unwrap().as_ref().map(|a| a.day.clone());
-    if let Some(day) = day {
-        art::want(hub.clone(), day, true);
+    match day {
+        Some(day) => {
+            art::want(hub.clone(), day, true);
+            back(
+                "art",
+                Ok("Asking the museum for another painting. Reload in a few seconds to see it."),
+            )
+        }
+        None => back("art", Err("There is no painting to replace yet.".into())),
     }
-    Redirect::to("/")
 }
 
 pub async fn place_add(State(hub): State<Shared>, Form(place): Form<Place>) -> Redirect {
     let valid =
         !place.name.trim().is_empty() && (-90.0..=90.0).contains(&place.lat) && (-180.0..=180.0).contains(&place.lon);
-    if valid {
-        let timezone = place.timezone.filter(|tz| !tz.is_empty());
-        hub.config.write().unwrap().places.push(Place {
-            name: place.name.trim().to_owned(),
-            timezone,
-            ..place
-        });
-        save(&hub);
+    if !valid {
+        return back("places", Err("That place needs a name and real coordinates.".into()));
     }
-    Redirect::to("/")
+    let timezone = place.timezone.filter(|tz| !tz.is_empty());
+    hub.config.write().unwrap().places.push(Place {
+        name: place.name.trim().chars().take(40).collect(),
+        timezone,
+        ..place
+    });
+    saved(&hub, "Place added.")
 }
 
 #[derive(Deserialize)]
@@ -346,25 +567,74 @@ pub async fn place_rename(State(hub): State<Shared>, Form(r): Form<Rename>) -> R
             .get_mut(r.index)
             .map(|place| place.name = name)
             .is_some();
-    if renamed {
-        save(&hub);
+    if !renamed {
+        return back("places", Err("That place could not be renamed.".into()));
     }
-    Redirect::to("/")
+    saved(&hub, "Place renamed.")
+}
+
+/// The first place is "here", so moving a place to the front makes it here.
+pub async fn place_here(State(hub): State<Shared>, Form(Index { index }): Form<Index>) -> Redirect {
+    {
+        let mut config = hub.config.write().unwrap();
+        if index >= config.places.len() {
+            return back("places", Err("That place is no longer in the list.".into()));
+        }
+        let place = config.places.remove(index);
+        config.places.insert(0, place);
+    }
+    saved(&hub, "The frame's \"here\" has moved.")
 }
 
 pub async fn place_remove(State(hub): State<Shared>, Form(Index { index }): Form<Index>) -> Redirect {
     {
         let mut config = hub.config.write().unwrap();
-        if index < config.places.len() {
-            config.places.remove(index);
+        if index >= config.places.len() {
+            return back("places", Err("That place is no longer in the list.".into()));
         }
+        config.places.remove(index);
     }
-    save(&hub);
-    Redirect::to("/")
+    saved(&hub, "Place removed.")
 }
 
-fn save(hub: &Shared) {
-    if let Err(e) = hub.config_changed() {
-        hub.log(format!("could not save config: {e}"));
+/// Save the places and tell the frame, then go back to the places card.
+fn saved(hub: &Shared, done: &str) -> Redirect {
+    match hub.config_changed() {
+        Ok(()) => back("places", Ok(done)),
+        Err(e) => {
+            hub.log(format!("could not save config: {e}"));
+            back("places", Err(format!("Changed, but not saved to disk: {e}")))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_way_back_carries_the_outcome_safely() {
+        assert_eq!(back_url("alert", Ok("Sent.")), "/?ok=Sent%2E#alert");
+        assert_eq!(
+            back_url("places", Err("a&b=c #d é".into())),
+            "/?err=a%26b%3Dc%20%23d%20%C3%A9#places"
+        );
+    }
+
+    #[test]
+    fn only_plain_hex_colours_reach_a_style_attribute() {
+        let fallback = "#000000";
+        assert_eq!(colour(&Value::from("#a7916f"), fallback), "#a7916f");
+        assert_eq!(colour(&Value::from("red;background:url(x)"), fallback), fallback);
+        assert_eq!(colour(&Value::from("#a7916"), fallback), fallback);
+        assert_eq!(colour(&Value::Null, fallback), fallback);
+    }
+
+    #[test]
+    fn log_lines_are_sorted_into_kinds() {
+        assert_eq!(log_kind("urgent from ci: disk full"), "urgent");
+        assert_eq!(log_kind("frame #3 connected"), "frame");
+        assert_eq!(log_kind("art of the day failed: timeout"), "bad");
+        assert_eq!(log_kind("now playing: helper went quiet"), "music");
     }
 }
