@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
@@ -18,6 +19,7 @@ import android.view.animation.AccelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import java.util.ArrayDeque
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -56,6 +58,7 @@ class AlertView(context: Context) : View(context) {
         letterSpacing = 0.12f
     }
     private val pill = RectF()
+    private val edge = Path()
 
     fun show(alert: Alert) {
         val now = current
@@ -137,13 +140,7 @@ class AlertView(context: Context) : View(context) {
             }
             URGENT -> {
                 blob.color = 0xFFFF6B5E.toInt()
-                val r = h * 0.95f
-                val cx = w + r * 0.35f + (1f - shown) * r * 1.1f
-                canvas.drawCircle(cx, h / 2, r, blob)
-                // Droplets riding the leading edge make it read as liquid rather than a panel.
-                droplet(canvas, cx, r, h * 0.22f, 64f, sin(t * 0.9f) * 10f)
-                droplet(canvas, cx, r, h * 0.60f, 86f, cos(t * 0.7f) * 12f)
-                droplet(canvas, cx, r, h * 0.90f, 48f, sin(t * 1.2f + 1f) * 8f)
+                drawFlood(canvas, w, h, t)
                 drawText(canvas, alert, w - URGENT_TEXT_W - 60f + (1f - shown) * 80f, h * 0.24f, textAlpha, "tap to dismiss")
             }
             else -> {
@@ -163,10 +160,55 @@ class AlertView(context: Context) : View(context) {
         postInvalidateOnAnimation()
     }
 
-    private fun droplet(canvas: Canvas, cx: Float, r: Float, y: Float, size: Float, bob: Float) {
-        val dy = y - height / 2f
-        val edge = cx - sqrt(max(0f, r * r - dy * dy))
-        canvas.drawCircle(edge + size * 0.25f + bob, y, size, blob)
+    /**
+     * Urgent: liquid pouring in from the right. The leading edge is one smooth curve, a big arc
+     * with slow waves running along it and soft bulges that swell, drift and subside, so
+     * it reads as a single body of liquid. Beads bud off the bulges and shrink away.
+     */
+    private fun drawFlood(canvas: Canvas, w: Float, h: Float, t: Float) {
+        val r = h * 0.95f
+        val cx = w + r * 0.35f + (1f - shown) * r * 1.1f
+        edge.rewind()
+        var px = 0f
+        var py = 0f
+        var y = -EDGE_STEP
+        while (y <= h + EDGE_STEP) {
+            val x = edgeX(y, t, cx, r, h)
+            if (edge.isEmpty) {
+                edge.moveTo(w + 10f, y)
+                edge.lineTo(x, y)
+            } else {
+                edge.quadTo(px, py, (px + x) / 2, (py + y) / 2)
+            }
+            px = x
+            py = y
+            y += EDGE_STEP
+        }
+        edge.lineTo(px, py)
+        edge.lineTo(w + 10f, py)
+        edge.close()
+        canvas.drawPath(edge, blob)
+
+        for (i in BEADS.indices step 4) {
+            val u = (t / BEADS[i + 2] + BEADS[i + 3]) % 1f
+            val by = h * BEADS[i] + sin(t * 0.7f + i) * 14f
+            // Each bead starts inside the liquid, so it appears to pinch off rather than pop in.
+            val bx = edgeX(by, t, cx, r, h) + 14f - u * BEADS[i + 1] * 3.6f
+            canvas.drawCircle(bx, by - u * 26f, BEADS[i + 1] * (1f - u) * shown, blob)
+        }
+    }
+
+    private fun edgeX(y: Float, t: Float, cx: Float, r: Float, h: Float): Float {
+        val dy = y - h / 2
+        var x = cx - sqrt(max(0f, r * r - dy * dy))
+        x += 16f * sin(y * 0.011f + t * 0.9f) + 10f * sin(y * 0.023f - t * 1.3f) + 6f * sin(y * 0.041f + t * 1.9f)
+        for (i in BULGES.indices step 4) {
+            val at = h * (0.5f + 0.44f * sin(t * BULGES[i + 2] + BULGES[i + 3]))
+            val swell = BULGES[i] * (0.62f + 0.38f * sin(t * BULGES[i + 2] * 3.1f + i))
+            val d = (y - at) / BULGES[i + 1]
+            x -= swell * exp(-d * d)
+        }
+        return x
     }
 
     private fun drawText(canvas: Canvas, alert: Alert, x: Float, y: Float, alpha: Int, hint: String?) {
@@ -211,5 +253,21 @@ class AlertView(context: Context) : View(context) {
         const val BEAD_R = 46f
         const val NUDGE_TEXT_W = 420
         const val URGENT_TEXT_W = 380
+        const val EDGE_STEP = 20f
+        /** Bulges on the flood's edge: reach in px, half-width in px, drift speed, phase. */
+        val BULGES = floatArrayOf(
+            74f, 72f, 0.23f, 0.0f,
+            98f, 96f, 0.17f, 2.1f,
+            56f, 54f, 0.31f, 4.0f,
+            84f, 80f, 0.13f, 5.2f,
+        )
+        /** Beads that bud off: height as a fraction of the screen, size in px, seconds per cycle, phase. */
+        val BEADS = floatArrayOf(
+            0.16f, 20f, 4.6f, 0.0f,
+            0.38f, 30f, 6.1f, 0.35f,
+            0.57f, 16f, 3.7f, 0.7f,
+            0.74f, 26f, 5.3f, 0.15f,
+            0.90f, 18f, 4.1f, 0.55f,
+        )
     }
 }
