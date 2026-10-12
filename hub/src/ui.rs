@@ -404,7 +404,7 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
 
     Html(format!(
         r##"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mado hub</title><style>{STYLE}</style>
+<title>Mado hub</title><link rel="icon" href="/icon.svg" type="image/svg+xml"><style>{STYLE}</style>
 <body class="t-{theme}" style="{tint}"><div class="wash"></div>
 <main>
 <header class="top"><a class="brand" href="/"><b lang="ja" aria-hidden="true">窓</b><h1>Mado</h1></a><span class="tag">hub · {version}</span><span class="grow"></span>{pill}
@@ -639,6 +639,17 @@ fn saved(hub: &Shared, done: &str) -> Redirect {
             back("places", Err(format!("Changed, but not saved to disk: {e}")))
         }
     }
+}
+
+/// The app icon, as the page's favicon.
+pub async fn icon() -> impl axum::response::IntoResponse {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "image/svg+xml"),
+            (axum::http::header::CACHE_CONTROL, "max-age=86400"),
+        ],
+        include_str!("icon.svg"),
+    )
 }
 
 #[cfg(test)]

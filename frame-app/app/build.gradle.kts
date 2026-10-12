@@ -13,8 +13,8 @@ android {
         // The reference frame (Uhale 102KZ) is Android 6.0.1 (API 23), 32-bit ARM, 1280x800 @ 160dpi.
         minSdk = 23
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.2.1"
     }
 }
 

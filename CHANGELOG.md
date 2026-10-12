@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- An icon: a framed painting with an alert bead on its edge. Used by the Mac app, the frame
+  app's launcher entry and the hub's web page. `assets/render-icons.sh` regenerates every size
+  from `assets/icon.svg`.
+
 ## 0.2.0
 
 - Mado for Mac: a Swift menu bar app replaces the command-line `mado-nowplaying` helper. It

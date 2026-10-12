@@ -1,3 +1,5 @@
+<img src="docs/images/icon.png" width="96" alt="" align="right">
+
 # Mado
 
 Mado (窓, "window") turns an old Android photo frame into a display your other machines and

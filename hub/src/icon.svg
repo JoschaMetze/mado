@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 100 824 824" width="824" height="824">
+  <defs>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#232c3d"/><stop offset="1" stop-color="#0e131b"/></linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#33407a"/><stop offset=".55" stop-color="#e58f7a"/><stop offset="1" stop-color="#ffcf87"/></linearGradient>
+    <clipPath id="pane"><rect x="286" y="296" width="452" height="432" rx="16"/></clipPath>
+  </defs>
+  <!-- The tile: macOS icon proportions, an 824 pt rounded square on a 1024 pt canvas. -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#ink)"/>
+  <!-- A frame with a painting in it. -->
+  <rect x="236" y="246" width="552" height="532" rx="40" fill="#f3ece0"/>
+  <g clip-path="url(#pane)">
+    <rect x="286" y="296" width="452" height="432" fill="url(#sky)"/>
+    <circle cx="512" cy="560" r="64" fill="#fff0c2"/>
+    <path d="M286 600 C380 540 440 600 520 584 C610 566 660 520 738 560 L738 728 L286 728 Z" fill="#2f5d50"/>
+    <path d="M286 660 C400 610 520 680 738 630 L738 728 L286 728 Z" fill="#1d3a33"/>
+  </g>
+  <!-- An alert arriving: the liquid bead from the frame's edge. -->
+  <circle cx="800" cy="372" r="58" fill="#ff6b5e"/>
+  <circle cx="868" cy="322" r="22" fill="#ff6b5e"/>
+</svg>
