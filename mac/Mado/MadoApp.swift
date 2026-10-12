@@ -24,10 +24,14 @@ struct MadoMenu: View {
         Divider()
         Toggle("Share What’s Playing", isOn: $model.sharing)
         ForEach(model.sources, id: \.id) { source in
-            Toggle(source.name, isOn: Binding(
-                get: { model.isEnabled(source) },
-                set: { model.setEnabled(source, $0) }
-            ))
+            if model.isInstalled(source) {
+                Toggle(source.name, isOn: Binding(
+                    get: { model.isEnabled(source) },
+                    set: { model.setEnabled(source, $0) }
+                ))
+            } else {
+                Text("\(source.name) (not installed)")
+            }
         }
         Divider()
         Button("Open Mado Settings") { model.openSettings() }

@@ -20,37 +20,51 @@ enum MediaCommand: String {
 }
 
 /// A player on this Mac that Mado can report on.
-@MainActor
-protocol MusicSource: AnyObject {
+protocol MusicSource: AnyObject, Sendable {
     /// Stable key for settings.
     var id: String { get }
     var name: String { get }
+    /// The player's bundle identifier, used to tell whether it is installed.
+    var bundleID: String { get }
     /// nil when the player is closed or stopped. Must never launch the player.
-    func read() -> Track?
+    func read() async -> Track?
     /// The cover for `track`, which is the one this source just reported.
     func artwork(for track: Track) async -> Data?
-    func send(_ command: MediaCommand)
+    func send(_ command: MediaCommand) async
 }
 
-/// Runs AppleScript in-process. macOS asks the user once per player for permission.
-/// NSAppleScript is main-thread only; each call takes a few milliseconds.
-@MainActor
-final class Script {
-    private let source: String
-    private var compiled: NSAppleScript?
-
-    init(_ source: String) {
-        self.source = source
+/// Runs AppleScript through `osascript`, off the main thread. macOS asks the user once per
+/// player for permission, and attributes the request to this app.
+///
+/// Not NSAppleScript: that is main-thread only and spins the run loop while it waits for the
+/// player to answer, which lets SwiftUI re-enter itself and crash.
+enum OSA {
+    static func run(_ script: String, _ arguments: [String] = []) async -> String? {
+        await withCheckedContinuation { done in
+            DispatchQueue.global(qos: .utility).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                process.arguments = ["-e", script] + arguments
+                let output = Pipe()
+                process.standardOutput = output
+                process.standardError = FileHandle.nullDevice
+                guard (try? process.run()) != nil else { return done.resume(returning: nil) }
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                guard process.terminationStatus == 0 else { return done.resume(returning: nil) }
+                var text = String(decoding: data, as: UTF8.self)
+                if text.hasSuffix("\n") { text.removeLast() }
+                done.resume(returning: text)
+            }
+        }
     }
 
-    /// A script that names an app's own terms only compiles while that app is installed,
-    /// so a failed compile is retried later instead of being remembered.
-    func run() -> NSAppleEventDescriptor? {
-        var error: NSDictionary?
-        if compiled == nil, let script = NSAppleScript(source: source), script.compileAndReturnError(&error) {
-            compiled = script
+    static func verb(for command: MediaCommand) -> String {
+        switch command {
+        case .playpause: return "playpause"
+        case .next: return "next track"
+        case .previous: return "previous track"
         }
-        return compiled?.executeAndReturnError(&error)
     }
 }
 
@@ -72,68 +86,72 @@ enum PlayerReply {
     }
 }
 
-@MainActor
 final class AppleMusic: MusicSource {
     let id = "apple-music"
     let name = "Apple Music"
+    let bundleID = "com.apple.Music"
 
-    private let reader = Script("""
-        if application "Music" is not running then return "stopped"
-        tell application "Music"
-            set s to player state as text
-            if s is "stopped" then return "stopped"
-            set d to character id 31
-            set t to current track
-            return s & d & (name of t) & d & (artist of t) & d & (album of t) & d & (duration of t) & d & (player position)
-        end tell
-        """)
-
-    private let cover = Script("""
-        if application "Music" is not running then return missing value
-        tell application "Music" to return raw data of artwork 1 of current track
-        """)
-
-    func read() -> Track? {
-        PlayerReply.parse(reader.run()?.stringValue)
+    func read() async -> Track? {
+        PlayerReply.parse(await OSA.run("""
+            if application "Music" is not running then return "stopped"
+            tell application "Music"
+                set s to player state as text
+                if s is "stopped" then return "stopped"
+                set d to character id 31
+                set t to current track
+                return s & d & (name of t) & d & (artist of t) & d & (album of t) & d & (duration of t) & d & (player position)
+            end tell
+            """))
     }
 
     /// Music's own artwork if it has any; streamed tracks often have none, and then the
     /// cover is looked up in the iTunes catalogue.
     func artwork(for track: Track) async -> Data? {
-        if let data = cover.run()?.data, !data.isEmpty { return data }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("mado-artwork-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let wrote = await OSA.run("""
+            on run argv
+                if application "Music" is not running then return "none"
+                tell application "Music"
+                    try
+                        set bytes to raw data of artwork 1 of current track
+                    on error
+                        return "none"
+                    end try
+                end tell
+                set f to open for access POSIX file (item 1 of argv) with write permission
+                set eof f to 0
+                write bytes to f
+                close access f
+                return "ok"
+            end run
+            """, [file.path])
+        if wrote == "ok", let data = try? Data(contentsOf: file), !data.isEmpty { return data }
         return await Catalogue.artwork(for: track)
     }
 
-    func send(_ command: MediaCommand) {
-        let verb: String
-        switch command {
-        case .playpause: verb = "playpause"
-        case .next: verb = "next track"
-        case .previous: verb = "previous track"
-        }
-        _ = Script("if application \"Music\" is running then tell application \"Music\" to \(verb)").run()
+    func send(_ command: MediaCommand) async {
+        _ = await OSA.run("if application \"Music\" is running then tell application \"Music\" to \(OSA.verb(for: command))")
     }
 }
 
-@MainActor
 final class Spotify: MusicSource {
     let id = "spotify"
     let name = "Spotify"
+    let bundleID = "com.spotify.client"
 
     // Spotify reports duration in milliseconds and gives a URL for the cover.
-    private let reader = Script("""
-        if application "Spotify" is not running then return "stopped"
-        tell application "Spotify"
-            set s to player state as text
-            if s is "stopped" then return "stopped"
-            set d to character id 31
-            set t to current track
-            return s & d & (name of t) & d & (artist of t) & d & (album of t) & d & (duration of t) & d & (player position) & d & (artwork url of t)
-        end tell
-        """)
-
-    func read() -> Track? {
-        PlayerReply.parse(reader.run()?.stringValue, durationScale: 0.001)
+    func read() async -> Track? {
+        PlayerReply.parse(await OSA.run("""
+            if application "Spotify" is not running then return "stopped"
+            tell application "Spotify"
+                set s to player state as text
+                if s is "stopped" then return "stopped"
+                set d to character id 31
+                set t to current track
+                return s & d & (name of t) & d & (artist of t) & d & (album of t) & d & (duration of t) & d & (player position) & d & (artwork url of t)
+            end tell
+            """), durationScale: 0.001)
     }
 
     func artwork(for track: Track) async -> Data? {
@@ -143,14 +161,8 @@ final class Spotify: MusicSource {
         return await Catalogue.artwork(for: track)
     }
 
-    func send(_ command: MediaCommand) {
-        let verb: String
-        switch command {
-        case .playpause: verb = "playpause"
-        case .next: verb = "next track"
-        case .previous: verb = "previous track"
-        }
-        _ = Script("if application \"Spotify\" is running then tell application \"Spotify\" to \(verb)").run()
+    func send(_ command: MediaCommand) async {
+        _ = await OSA.run("if application \"Spotify\" is running then tell application \"Spotify\" to \(OSA.verb(for: command))")
     }
 }
 

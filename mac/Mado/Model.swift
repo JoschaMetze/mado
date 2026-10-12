@@ -34,7 +34,7 @@ final class Model: ObservableObject {
     private var art: String?
     private var sendArt = false
     private var last: Report?
-    private var posting = false
+    private var busy = false
     private var timer: Timer?
     private var commands: Task<Void, Never>?
 
@@ -55,6 +55,12 @@ final class Model: ObservableObject {
 
     func isEnabled(_ source: MusicSource) -> Bool { !disabled.contains(source.id) }
 
+    /// A player that is not on this Mac is never asked: naming a missing app in AppleScript
+    /// makes macOS ask the user where it is.
+    func isInstalled(_ source: MusicSource) -> Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: source.bundleID) != nil
+    }
+
     func setEnabled(_ source: MusicSource, _ on: Bool) {
         if on { disabled.remove(source.id) } else { disabled.insert(source.id) }
         defaults.set(Array(disabled), forKey: "disabledSources")
@@ -62,20 +68,34 @@ final class Model: ObservableObject {
     }
 
     /// The first enabled player that is playing, otherwise the first that has a track at all.
-    private func current() -> (MusicSource, Track)? {
+    private func current() async -> (MusicSource, Track)? {
         guard sharing else { return nil }
-        let reads = sources.filter(isEnabled).compactMap { source in source.read().map { (source, $0) } }
+        var reads: [(MusicSource, Track)] = []
+        for source in sources where isEnabled(source) && isInstalled(source) {
+            if let track = await source.read() { reads.append((source, track)) }
+        }
         return reads.first { $0.1.playing } ?? reads.first
     }
 
     private func tick() {
-        guard let hub else {
+        guard hub != nil else {
             statusLine = "Set the hub address to begin"
             reachable = false
             return
         }
-        guard !posting else { return }
-        let now = current()
+        // One round at a time. A round can take a while: the first read of a player waits
+        // for the user to answer the permission prompt.
+        guard !busy else { return }
+        busy = true
+        Task {
+            await round()
+            busy = false
+        }
+    }
+
+    private func round() async {
+        let now = await current()
+        guard let hub else { return }
         let track = now?.1
         active = now?.0
         let state = track.map { $0.playing ? "playing" : "paused" } ?? "stopped"
@@ -110,23 +130,19 @@ final class Model: ObservableObject {
         let withArt = sendArt
         if withArt { body["art_b64"] = art }
 
-        posting = true
-        Task {
-            defer { posting = false }
-            do {
-                let reply = try await hub.post("api/now_playing", body)
-                // A restarted hub has lost the cover; hand it over again next round. If it
-                // was in this very request, the hub could not read it and never will.
-                sendArt = !withArt && art != nil && (reply["have_art"] as? Bool) == false
-                last = Report(state: state, key: key, position: position, at: Date())
-                reachable = true
-                statusLine = "Connected to \(hub.base.host ?? "the hub")"
-            } catch {
-                last = nil
-                sendArt = art != nil
-                reachable = false
-                statusLine = "Cannot reach the hub"
-            }
+        do {
+            let reply = try await hub.post("api/now_playing", body)
+            // A restarted hub has lost the cover; hand it over again next round. If it
+            // was in this very request, the hub could not read it and never will.
+            sendArt = !withArt && art != nil && (reply["have_art"] as? Bool) == false
+            last = Report(state: state, key: key, position: position, at: Date())
+            reachable = true
+            statusLine = "Connected to \(hub.base.host ?? "the hub")"
+        } catch {
+            last = nil
+            sendArt = art != nil
+            reachable = false
+            statusLine = "Cannot reach the hub"
         }
     }
 
@@ -145,7 +161,7 @@ final class Model: ObservableObject {
                     let reply = try await hub.nextCommand(after: seq)
                     seq = reply["seq"] as? Int
                     if let name = reply["command"] as? String, let command = MediaCommand(rawValue: name), sharing {
-                        active?.send(command)
+                        await active?.send(command)
                     }
                 } catch {
                     // Start over from the hub's current number so an old tap is not replayed.
