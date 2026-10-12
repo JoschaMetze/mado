@@ -39,6 +39,13 @@ class MainActivity : Activity(), HubLink.Listener {
     private var playState = ""
     private val backHome = Runnable { showScene(HOME) }
     private var link: HubLink? = null
+    private lateinit var weatherSource: WeatherSource
+    private val weatherWatch = object : Runnable {
+        override fun run() {
+            refreshWeather()
+            root.postDelayed(this, WEATHER_EVERY_MS)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,6 +89,8 @@ class MainActivity : Activity(), HubLink.Listener {
         adoptHubAddress(intent)
         connect()
         root.postDelayed(dayWatch, 60_000)
+        weatherSource = WeatherSource(this)
+        weatherWatch.run()
     }
 
     // `am start ... --es hub ws://host:7878/frame` points the frame at a hub; it is remembered.
@@ -130,6 +139,21 @@ class MainActivity : Activity(), HubLink.Listener {
         if (up) {
             paintingDay = ""
             askForPainting()
+        }
+    }
+
+    // The first place in the hub's list is "here". The saved copy keeps weather working
+    // when the hub is unreachable.
+    private fun refreshWeather() {
+        val here = try {
+            JSONObject(prefs().getString("config", null) ?: "{}").optJSONArray("places")?.optJSONObject(0)
+        } catch (e: Exception) {
+            null
+        }
+        if (here == null) return dashboard.setWeather(null)
+        weatherSource.fetch(here.optString("name"), here.optDouble("lat"), here.optDouble("lon")) { weather ->
+            // A failed refresh keeps the last forecast on screen rather than blanking it.
+            if (weather != null) dashboard.setWeather(weather)
         }
     }
 
@@ -204,7 +228,10 @@ class MainActivity : Activity(), HubLink.Listener {
             "projects" -> projects(msg)
             "look" -> look(msg.optLong("req"))
             // Kept for the scenes that will use it (weather places); nothing reads it yet.
-            "config" -> prefs().edit().putString("config", msg.optJSONObject("config")?.toString()).apply()
+            "config" -> {
+                prefs().edit().putString("config", msg.optJSONObject("config")?.toString()).apply()
+                refreshWeather()
+            }
         }
     }
 
@@ -306,6 +333,7 @@ class MainActivity : Activity(), HubLink.Listener {
         /** Where the stage rests when nothing else wants it. */
         const val HOME = DASHBOARD
         const val SCENE_FADE_MS = 700L
+        const val WEATHER_EVERY_MS = 20 * 60_000L
         const val PAUSED_LINGER_MS = 120_000L
         const val STOPPED_LINGER_MS = 10_000L
     }

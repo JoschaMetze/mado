@@ -10,6 +10,9 @@ What works today:
   the Art Institute of Chicago. The frame shows it with the time and your projects in one of
   four layouts, all coloured from the painting itself. Tap the label to read about it and
   get a QR code for the museum's page; tap elsewhere for the next layout.
+- **Weather in a sentence.** "Rain easing by three", with the temperature and sunset. The
+  frame fetches the forecast itself (Open-Meteo), so it keeps working when the hub is down.
+  Places are found by city name in the hub's web interface.
 - **Project status.** Agents report where a project stands (`frame_project`) and the
   dashboard keeps the latest word on each.
 - **Now playing.** The album cover of whatever Apple Music is playing on your Mac, with a
@@ -23,7 +26,8 @@ What works today:
 - **The rail.** Tap or swipe the left edge of the frame for scenes, brightness and the way
   back to the launcher.
 
-Planned: weather, Tama (a small on-screen companion), agent canvases, night mode.
+Planned: weather for a second place (family elsewhere), Tama (a small on-screen companion),
+agent canvases, night mode.
 
 ## How it fits together
 
@@ -42,8 +46,7 @@ Planned: weather, Tama (a small on-screen companion), agent canvases, night mode
 | `nowplaying/` | `mado-nowplaying`, a macOS helper that reports Apple Music to the hub. Rust. |
 
 The frame holds no secrets and listens on no ports: it opens one outbound connection to the
-hub and draws what it is told. It keeps its clock (and, later, weather) working when the hub
-is down.
+hub and draws what it is told. Its clock and weather keep working when the hub is down.
 
 ## Running it
 

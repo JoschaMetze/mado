@@ -49,6 +49,7 @@ class DashboardView(context: Context) : View(context) {
 
     private var art = NO_ART
     private var projects: List<Project> = emptyList()
+    private var weather: Weather? = null
     private var learnOpen = false
     private var learn = 0f
     private var learnTitle: StaticLayout? = null
@@ -87,6 +88,11 @@ class DashboardView(context: Context) : View(context) {
             .setMaxLines(3).setEllipsize(TextUtils.TruncateAt.END).build()
         learnText = StaticLayout.Builder.obtain(a.text, 0, a.text.length, type(19f, sans, WHITE), LEARN_TEXT_W)
             .setLineSpacing(0f, 1.42f).setMaxLines(11).setEllipsize(TextUtils.TruncateAt.END).build()
+        invalidate()
+    }
+
+    fun setWeather(weather: Weather?) {
+        this.weather = weather
         invalidate()
     }
 
@@ -166,6 +172,11 @@ class DashboardView(context: Context) : View(context) {
         val x = 40f + text.measureText(time) + 26f
         canvas.drawText(weekday.format(now).uppercase(), x, h - 82f, mono(WHITE, shadow = true, size = 16f))
         canvas.drawText(dayMonth.format(now).uppercase(), x, h - 56f, mono(WHITE, shadow = true, size = 16f))
+
+        weather?.let {
+            canvas.drawText("${it.tempC}°", w - 46f, h - 98f, type(78f, thin, WHITE, align = Paint.Align.RIGHT, shadow = true))
+            canvas.drawText(it.sentence, w - 52f, h - 54f, type(28f, italic, WHITE, align = Paint.Align.RIGHT, shadow = true))
+        }
     }
 
     // --- B: a matted print on a wall the painting's colour --------------------------------
@@ -197,6 +208,11 @@ class DashboardView(context: Context) : View(context) {
         canvas.drawText(clock.format(now), x - 8f, 206f, type(176f, thin, art.paper, spacing = -0.02f))
         canvas.drawText("${weekday.format(now)} · ${dayMonth.format(now)}".uppercase(), x, 252f, mono(art.paper, 0.72f, 16f))
         rule(canvas, x, right, 290f)
+        weather?.let {
+            canvas.drawText(fit(it.sentence + ".", type(34f, italic, art.paper), right - x), x, 346f, text)
+            canvas.drawText(fit(it.detail, type(17f, sans, art.paper, 0.72f), right - x), x, 378f, text)
+            rule(canvas, x, right, 412f)
+        }
 
         val top = 736f - projects.size * 62f
         if (projects.isNotEmpty()) canvas.drawText("IN THE STUDIO", x, top - 30f, mono(art.paper, 0.55f, 14f))
@@ -223,7 +239,11 @@ class DashboardView(context: Context) : View(context) {
         val right = w - 44f
         canvas.drawText(hour.format(now), x - 10f, 206f, type(218f, heavy, art.accent, spacing = -0.05f))
         canvas.drawText(minute.format(now), x - 10f, 392f, type(218f, heavy, art.paper, spacing = -0.05f))
-        canvas.drawText(shortDate.format(now).uppercase(), x, 442f, mono(art.paper, 0.7f, 16f))
+        canvas.drawText(shortDate.format(now).uppercase(), x, 438f, mono(art.paper, 0.7f, 16f))
+        weather?.let {
+            canvas.drawText(fit("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", type(23f, bold, art.paper), right - x), x, 480f, text)
+            canvas.drawText(fit("${it.highC}° high" + if (it.sunset.isEmpty()) "" else " · sunset ${it.sunset}", type(16f, sans, art.paper, 0.7f), right - x), x, 506f, text)
+        }
 
         var y = h - 40f - projects.size * 58f
         projects.forEachIndexed { i, p ->
@@ -307,6 +327,9 @@ class DashboardView(context: Context) : View(context) {
             }
         }
         canvas.drawText(clock.format(now), w / 2, 320f, type(290f, thin, WHITE, spacing = -0.03f, align = Paint.Align.CENTER, shadow = true))
+        weather?.let {
+            canvas.drawText("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", w / 2, 396f, type(32f, italic, WHITE, align = Paint.Align.CENTER, shadow = true))
+        }
     }
 
     // --- shared pieces --------------------------------------------------------------------
