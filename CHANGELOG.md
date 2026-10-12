@@ -6,6 +6,7 @@
   (landscapes, sea and water, portraits, still lifes, flowers, animals, towns), and things
   to leave out (religious scenes, nudes, death and war). Set on the hub's page, which then
   picks a new painting that fits and says how many it chose from.
+- Hub page: "Recent" shows the newest six lines and folds the rest away.
 
 ## 0.2.1
 

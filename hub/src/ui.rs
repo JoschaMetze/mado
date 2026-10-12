@@ -17,6 +17,8 @@ use crate::{art, projects, Notify, Place, Shared};
 const STYLE: &str = include_str!("ui.css");
 /// How often the picture of the glass reloads itself. Each reload asks the frame for a screenshot.
 const GLASS_REFRESH_S: u32 = 30;
+/// How many log lines the page shows before the rest are folded away.
+const RECENT_SHOWN: usize = 6;
 /// The looks the page can wear: the value saved in the config, and its name on the switch.
 /// The first is the default.
 const THEMES: [(&str, &str); 2] = [("gallery", "Gallery"), ("workbench", "Workbench")];
@@ -434,7 +436,7 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
         colour(&palette["swatches"][2], "#1f9d6b"),
     );
 
-    let log: String = hub
+    let lines: Vec<String> = hub
         .log
         .lock()
         .unwrap()
@@ -448,10 +450,19 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
             )
         })
         .collect();
-    let log = if log.is_empty() {
-        r#"<li class="muted">Nothing has happened since the hub started.</li>"#.to_owned()
-    } else {
-        log
+    // The newest few are always shown; the rest wait behind a disclosure.
+    let (latest, earlier) = lines.split_at(lines.len().min(RECENT_SHOWN));
+    let log = match (latest.is_empty(), earlier.is_empty()) {
+        (true, _) => {
+            r#"<ul class="log"><li class="muted">Nothing has happened since the hub started.</li></ul>"#.to_owned()
+        }
+        (false, true) => format!(r#"<ul class="log">{}</ul>"#, latest.concat()),
+        (false, false) => format!(
+            r#"<ul class="log">{}</ul><details><summary>{} earlier</summary><ul class="log">{}</ul></details>"#,
+            latest.concat(),
+            earlier.len(),
+            earlier.concat()
+        ),
     };
 
     Html(format!(
@@ -514,7 +525,7 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
     <p class="muted small">"Here" gets the full forecast on the dashboard; the others get a line each with their local time. The frame fetches the weather itself.</p>
   </section>
   <section id="recent"><div class="head"><p class="eyebrow">Since the hub started</p><h2>Recent</h2></div>
-    <ul class="log">{log}</ul>
+    {log}
   </section>
   <section id="connect"><div class="head"><p class="eyebrow">Plug things in</p><h2>Connect</h2></div>
     <p>Agents speak MCP at <code>{scheme}://{host}/mcp</code></p>
