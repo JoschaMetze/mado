@@ -11,6 +11,9 @@
   itself every 30 seconds. Alert levels are shown as pictures, projects can be edited and
   given progress, any place can be made "here", now playing and the painting's story and
   palette are shown, and every form says what it did. Still server-rendered with no script.
+- Hub: a second look for the web page, "Workbench": monospace, hairline rules and numbered
+  sections. Switch between it and the default "Gallery" in the page header; the choice is
+  saved in the hub's config.
 - Hub: exits promptly on SIGTERM, so `docker stop` no longer waits to kill it.
 
 ## 0.1.0

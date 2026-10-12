@@ -47,6 +47,9 @@ const FRAME_SILENCE: Duration = Duration::from_secs(65);
 pub struct Config {
     #[serde(default)]
     pub places: Vec<Place>,
+    /// How the hub's own page looks; the frame ignores it. Empty means the default.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub theme: String,
 }
 
 /// A place the frame shows weather for. The frame fetches the forecast itself.
@@ -359,6 +362,7 @@ async fn main() {
         .route("/ui/places/here", post(ui::place_here))
         .route("/ui/projects", post(ui::project))
         .route("/ui/art/another", post(ui::art_another))
+        .route("/ui/theme", post(ui::theme))
         .route("/api/notify", post(api_notify))
         .route("/api/state", get(api_state))
         .route("/api/look", get(api_look))

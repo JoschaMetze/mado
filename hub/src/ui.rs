@@ -17,6 +17,9 @@ use crate::{art, projects, Notify, Place, Shared};
 const STYLE: &str = include_str!("ui.css");
 /// How often the picture of the glass reloads itself. Each reload asks the frame for a screenshot.
 const GLASS_REFRESH_S: u32 = 30;
+/// The looks the page can wear: the value saved in the config, and its name on the switch.
+/// The first is the default.
+const THEMES: [(&str, &str); 2] = [("gallery", "Gallery"), ("workbench", "Workbench")];
 
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -353,7 +356,20 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
         }
     };
 
-    let places = place_rows(&hub.config.read().unwrap().places);
+    let (places, theme) = {
+        let config = hub.config.read().unwrap();
+        let theme = THEMES.iter().find(|t| t.0 == config.theme).unwrap_or(&THEMES[0]).0;
+        (place_rows(&config.places), theme)
+    };
+    let themes: String = THEMES
+        .iter()
+        .map(|(value, name)| {
+            format!(
+                r#"<button name="theme" value="{value}" aria-pressed="{}">{name}</button>"#,
+                *value == theme
+            )
+        })
+        .collect();
     let state = hub.state();
     let np = now_playing_card(&state["now_playing"]);
     let projects = project_rows(&state["projects"]);
@@ -389,9 +405,10 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
     Html(format!(
         r##"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mado hub</title><style>{STYLE}</style>
-<body style="{tint}"><div class="wash"></div>
+<body class="t-{theme}" style="{tint}"><div class="wash"></div>
 <main>
-<header class="top"><a class="brand" href="/"><b lang="ja" aria-hidden="true">窓</b><h1>Mado</h1></a><span class="tag">hub · {version}</span><span class="grow"></span>{pill}</header>
+<header class="top"><a class="brand" href="/"><b lang="ja" aria-hidden="true">窓</b><h1>Mado</h1></a><span class="tag">hub · {version}</span><span class="grow"></span>{pill}
+<form class="themes" method="post" action="/ui/theme" aria-label="How this page looks">{themes}</form></header>
 {flash}
 <div class="hero">
   <div class="stage">
@@ -527,6 +544,22 @@ pub async fn art_another(State(hub): State<Shared>) -> Redirect {
         }
         None => back("art", Err("There is no painting to replace yet.".into())),
     }
+}
+
+#[derive(Deserialize)]
+pub struct Theme {
+    theme: String,
+}
+
+pub async fn theme(State(hub): State<Shared>, Form(Theme { theme }): Form<Theme>) -> Redirect {
+    if !THEMES.iter().any(|t| t.0 == theme) {
+        return back("", Err("There is no theme by that name.".into()));
+    }
+    hub.config.write().unwrap().theme = theme;
+    if let Err(e) = hub.config_changed() {
+        hub.log(format!("could not save config: {e}"));
+    }
+    Redirect::to("/")
 }
 
 pub async fn place_add(State(hub): State<Shared>, Form(place): Form<Place>) -> Redirect {

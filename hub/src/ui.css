@@ -38,6 +38,9 @@ pre{margin:0;font:.8rem/1.55 var(--mono);background:var(--sunk);border:1px solid
 .brand b{display:grid;place-items:center;width:44px;height:44px;border-radius:12px;background:var(--fg);color:var(--bg);font:600 1.45rem/1 var(--body)}
 .brand h1{font-size:2rem;font-weight:800;letter-spacing:-.03em}
 .grow{flex:1}
+.themes{display:flex;gap:0;border:1px solid var(--line);border-radius:99px;background:var(--panel);padding:3px}
+.themes button{background:transparent;border-color:transparent;color:var(--muted);font-weight:500;font-size:.84rem;padding:4px 12px;border-radius:99px}
+.themes button[aria-pressed=true]{background:var(--fg);color:var(--bg)}
 .pill{display:inline-flex;align-items:center;gap:.55em;padding:7px 14px;border-radius:99px;background:var(--panel);border:1px solid var(--line);font-size:.88rem;font-weight:500}
 .dot{flex:none;width:.6em;height:.6em;border-radius:50%;background:var(--bad)}
 .up .dot{background:var(--ok);box-shadow:0 0 0 0 var(--ok);animation:ping 2.6s ease-out infinite}
@@ -148,3 +151,84 @@ li{min-width:0}
 
 @media (max-width:860px){.hero,.grid,.art{grid-template-columns:minmax(0,1fr)}}
 @media (prefers-reduced-motion:reduce){.up .dot,.flash{animation:none}}
+
+/* Workbench: the alternative look. One monospace face, a white sheet, hairline rules instead
+   of cards, numbered sections and outlined pills. Everything above still applies; this only
+   overrides it. */
+.t-workbench{
+  --bg:#fff;--panel:#fff;--sunk:#fff;--fg:#2a2a28;--muted:#777772;--line:#d0d0cb;
+  --accent:#c9462c;--accent-soft:#fbeeea;--on-accent:#fff;--bezel:#1c1c1a;
+  --display:var(--mono);--body:var(--mono);
+  --mono:"Commit Mono","Geist Mono","JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  font-size:14.5px;line-height:1.65;counter-reset:card;
+}
+@media (prefers-color-scheme:dark){.t-workbench{
+  --bg:#111110;--panel:#111110;--sunk:#111110;--fg:#e9e7e2;--muted:#8d8b85;--line:#33332f;
+  --accent:#ff6f52;--accent-soft:#2a1814;--on-accent:#111110;--bezel:#000;
+}}
+.t-workbench .wash{display:none}
+.t-workbench main{gap:0;padding-top:20px}
+.t-workbench h1,.t-workbench h2,.t-workbench h3{font-weight:400;letter-spacing:-.01em}
+.t-workbench h2{font-size:2rem}
+.t-workbench .top{padding-bottom:28px}
+.t-workbench .brand b{border-radius:0;background:none;color:var(--fg);border:1px solid var(--fg);width:38px;height:38px;font-size:1.2rem}
+.t-workbench .brand h1{font-size:1.5rem;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--accent)}
+.t-workbench .brand h1::after{content:" HUB";color:var(--fg)}
+.t-workbench .top>.tag{display:none}
+.t-workbench .pill{padding:8px 16px}
+.t-workbench .eyebrow{color:var(--muted)}
+.t-workbench section .eyebrow::before{counter-increment:card;content:counter(card,decimal-leading-zero) " / "}
+
+/* rules, not cards */
+.t-workbench section{background:none;border:0;border-top:1px solid var(--line);border-radius:0;padding:32px 0 40px;gap:20px}
+.t-workbench .hero,.t-workbench .grid{gap:0;align-items:stretch}
+.t-workbench .hero{border-top:1px solid var(--line)}
+.t-workbench .stage{padding:32px 32px 40px 0;align-content:start}
+.t-workbench .side{gap:0;border-left:1px solid var(--line);align-content:start}
+.t-workbench .side section{padding-left:32px}
+.t-workbench .side section:first-child{border-top:0}
+.t-workbench #projects,.t-workbench #recent{padding-right:32px}
+.t-workbench #places,.t-workbench #connect{padding-left:32px;border-left:1px solid var(--line)}
+.t-workbench .device{border-radius:14px;box-shadow:none}
+
+/* controls */
+.t-workbench input,.t-workbench select,.t-workbench textarea{border-radius:4px}
+.t-workbench button{background:transparent;border-color:var(--fg);color:var(--fg);border-radius:99px;font-weight:400;padding:9px 20px}
+.t-workbench button:hover{border-color:var(--accent);color:var(--accent);filter:none}
+.t-workbench button.quiet{border-color:var(--line);color:var(--muted);padding:5px 12px}
+.t-workbench .themes button{border-color:transparent;padding:4px 12px}
+.t-workbench .themes button[aria-pressed=true]{background:var(--fg);color:var(--bg)}
+.t-workbench .levels span{border-radius:4px;font-weight:400}
+.t-workbench .levels i{border-radius:2px}
+.t-workbench .actions a,.t-workbench .caption a{text-decoration:none}
+.t-workbench .actions a::after,.t-workbench .caption a::after{content:" \2197"}
+.t-workbench code,.t-workbench pre{border-radius:4px;background:var(--accent-soft);border-color:transparent}
+.t-workbench .badge{border-radius:99px}
+.t-workbench .project b,.t-workbench .rename input{font-weight:400;color:var(--accent);font-size:1.15rem}
+.t-workbench .bar{height:2px;border-radius:0}
+.t-workbench .bar i{border-radius:0}
+
+/* now playing lies flat on the sheet */
+.t-workbench .np{color:var(--fg);background:none;border-color:var(--line)}
+.t-workbench .np>.back{display:none}
+.t-workbench .np .cover{transform:none;border-radius:0;box-shadow:none}
+.t-workbench .np .eyebrow{color:var(--muted)}
+.t-workbench .np .bar{background:var(--line)}
+.t-workbench .np .bar i{background:var(--accent)}
+
+/* the painting sits on drafting paper */
+.t-workbench .art{gap:40px}
+.t-workbench .art .canvas{border-radius:0;padding:36px;background-color:color-mix(in srgb,var(--fg) 5%,var(--bg));
+  background-image:repeating-linear-gradient(30deg,transparent 0 23px,var(--line) 23px 24px),repeating-linear-gradient(150deg,transparent 0 23px,var(--line) 23px 24px)}
+.t-workbench .art .canvas img{border-radius:0;box-shadow:0 0 0 1px var(--fg)}
+.t-workbench .art h3{font-style:normal;font-weight:400;color:var(--accent)}
+.t-workbench .swatches{border-radius:0;height:18px}
+.t-workbench .flash{border-radius:99px}
+
+@media (max-width:860px){
+  .t-workbench .stage{padding-right:0}
+  .t-workbench .side,.t-workbench #places,.t-workbench #connect{border-left:0}
+  .t-workbench .side section,.t-workbench #places,.t-workbench #connect{padding-left:0}
+  .t-workbench .side section:first-child{border-top:1px solid var(--line)}
+  .t-workbench #projects,.t-workbench #recent{padding-right:0}
+}
