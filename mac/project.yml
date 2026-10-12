@@ -45,6 +45,9 @@ targets:
         # ad-hoc signed app, and tests run against Debug.
         Release:
           ENABLE_HARDENED_RUNTIME: YES
+          # Xcode adds the debugging entitlement (get-task-allow) to anything it builds
+          # outside an archive, and Apple's notary rejects it.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
   MadoTests:
     type: bundle.unit-test
     platform: macOS

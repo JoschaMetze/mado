@@ -89,6 +89,10 @@ before doing.
    cd mac && scripts/build.sh install
    ```
 
+   Or download the notarized `Mado.zip` from the
+   [latest release](https://github.com/abradburne/mado/releases/latest) and drag Mado to
+   Applications.
+
    Choose "Hub Address…" from its menu and enter the hub's address. macOS asks once for
    permission to control Music or Spotify; the app never launches either. The menu also has
    a switch for each player, one to pause sharing, and "Start at Login".

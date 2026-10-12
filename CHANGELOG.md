@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Mado for Mac: a Swift menu bar app replaces the command-line `mado-nowplaying` helper. It
   reports Apple Music and Spotify, can pause sharing, starts at login if asked, and builds

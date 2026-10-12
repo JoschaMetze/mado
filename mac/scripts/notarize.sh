@@ -1,16 +1,18 @@
 #!/bin/sh
 # Notarize build/Mado.app so it opens on other Macs without a Gatekeeper warning.
 #
-# Before the first run:
-#   1. Sign with a Developer ID (see Signing.xcconfig) and run scripts/build.sh.
-#   2. Store notary credentials in your keychain, once, under a profile name:
-#        xcrun notarytool store-credentials mado-notary
-#      (it asks for your Apple ID, team ID and an app-specific password).
+# First sign with a Developer ID (see Signing.xcconfig) and run scripts/build.sh. Then use
+# whichever of these holds your Apple credentials:
 #
-# Then:  scripts/notarize.sh [profile-name]     (default profile: mado-notary)
+#   scripts/notarize.sh [profile]        Apple's notarytool, with a keychain profile made by
+#                                        `xcrun notarytool store-credentials` (default name:
+#                                        mado-notary)
+#   scripts/notarize.sh asc [profile]    the App Store Connect CLI (https://asccli.sh), with
+#                                        its default or a named authentication profile
+#
+# The result is build/Mado.zip, stapled, ready to attach to a release.
 set -e
 cd "$(dirname "$0")/.."
-profile="${1:-mado-notary}"
 app=build/Mado.app
 [ -d "$app" ] || { echo "Build first: scripts/build.sh" >&2; exit 1; }
 if codesign -dv "$app" 2>&1 | grep -q "Signature=adhoc"; then
@@ -18,7 +20,11 @@ if codesign -dv "$app" 2>&1 | grep -q "Signature=adhoc"; then
     exit 1
 fi
 ditto -c -k --keepParent "$app" build/Mado.zip
-xcrun notarytool submit build/Mado.zip --keychain-profile "$profile" --wait
+if [ "$1" = asc ]; then
+    asc ${2:+--profile "$2"} notarization submit --file build/Mado.zip --wait --output table
+else
+    xcrun notarytool submit build/Mado.zip --keychain-profile "${1:-mado-notary}" --wait
+fi
 xcrun stapler staple "$app"
 # Zip again so the download carries the stapled ticket.
 ditto -c -k --keepParent "$app" build/Mado.zip
