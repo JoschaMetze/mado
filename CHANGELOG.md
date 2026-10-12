@@ -16,4 +16,4 @@ First release.
 - **Now-playing helper** (`mado-nowplaying`): reports Apple Music on macOS.
 
 Known limits: the hub has no authentication; layouts assume a 1280×800 screen; temperatures
-are in Celsius; the Docker image and the CI workflow have not been run yet.
+are in Celsius; the Docker image has not been built and run yet.
