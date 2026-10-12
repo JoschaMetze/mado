@@ -1,12 +1,13 @@
 //! The web interface: status, a test alert, and all configuration. Server-rendered, no script.
 
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::{header::HOST, HeaderMap},
     response::{Html, Redirect},
     Form,
 };
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::{art, projects, Notify, Place, Shared};
 
@@ -37,6 +38,7 @@ li form{display:inline}
 .log li{justify-content:flex-start;font-size:.9rem}
 .log span,.muted{color:var(--muted)}
 .log span{flex:none;width:5.5em;font-variant-numeric:tabular-nums}
+summary{cursor:pointer;margin:14px 0 10px}
 code{font:.85em ui-monospace,Menlo,monospace;background:var(--bg);padding:.15em .4em;border-radius:4px;overflow-wrap:anywhere}
 "#;
 
@@ -52,8 +54,54 @@ fn ago(secs: u64) -> String {
     }
 }
 
-pub async fn index(State(hub): State<Shared>, headers: HeaderMap) -> Html<String> {
+#[derive(Deserialize)]
+pub struct Search {
+    city: Option<String>,
+}
+
+/// Look a city up by name with Open-Meteo's geocoder (free, no key).
+fn find_cities(name: &str) -> Result<Vec<Value>, String> {
+    let found: Value = ureq::get("https://geocoding-api.open-meteo.com/v1/search")
+        .query("name", name)
+        .query("count", "6")
+        .query("language", "en")
+        .query("format", "json")
+        .timeout(std::time::Duration::from_secs(8))
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_json()
+        .map_err(|e| e.to_string())?;
+    Ok(found["results"].as_array().cloned().unwrap_or_default())
+}
+
+pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search): Query<Search>) -> Html<String> {
     let host = headers.get(HOST).and_then(|h| h.to_str().ok()).unwrap_or("HUB_ADDRESS:7878");
+
+    let city = search.city.as_deref().map(str::trim).filter(|c| !c.is_empty()).map(str::to_owned);
+    let matches = match city.clone() {
+        None => String::new(),
+        Some(name) => match tokio::task::spawn_blocking(move || find_cities(&name)).await {
+            Ok(Ok(found)) if found.is_empty() => r#"<p class="muted">No city by that name. Try a different spelling.</p>"#.to_owned(),
+            Ok(Ok(found)) => {
+                let rows: String = found
+                    .iter()
+                    .map(|c| {
+                        let name = c["name"].as_str().unwrap_or("");
+                        let region: Vec<&str> = [c["admin1"].as_str(), c["country"].as_str()].into_iter().flatten().filter(|s| *s != name).collect();
+                        format!(
+                            r#"<li><span>{} <span class="muted">{}</span></span>
+                            <form method="post" action="/ui/places/add"><input type="hidden" name="name" value="{}"><input type="hidden" name="lat" value="{}"><input type="hidden" name="lon" value="{}"><input type="hidden" name="timezone" value="{}"><button>Add</button></form></li>"#,
+                            esc(name), esc(&region.join(", ")), esc(name),
+                            c["latitude"].as_f64().unwrap_or(0.0), c["longitude"].as_f64().unwrap_or(0.0),
+                            esc(c["timezone"].as_str().unwrap_or("")),
+                        )
+                    })
+                    .collect();
+                format!("<ul>{rows}</ul>")
+            }
+            _ => r#"<p class="muted">The city search is unreachable right now. You can still add a place by coordinates.</p>"#.to_owned(),
+        },
+    };
 
     let frames = hub.frames.lock().unwrap();
     let status = if frames.is_empty() {
@@ -91,9 +139,9 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap) -> Html<String
         .enumerate()
         .map(|(i, p)| {
             format!(
-                r#"<li><span>{} <span class="muted">{:.3}, {:.3}</span></span>
+                r#"<li><span>{}{} <span class="muted">{:.3}, {:.3}</span></span>
                 <form method="post" action="/ui/places/remove"><input type="hidden" name="index" value="{i}"><button class="quiet">Remove</button></form></li>"#,
-                esc(&p.name), p.lat, p.lon
+                esc(&p.name), if i == 0 { r#" <span class="tag">here</span>"# } else { "" }, p.lat, p.lon
             )
         })
         .collect();
@@ -167,6 +215,12 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap) -> Html<String
 <div class="cols">
   <section><h2>Weather places</h2>
     <ul>{places}</ul>
+    <form method="get" action="/">
+      <label>Find a city<input name="city" value="{city}" required placeholder="Kamakura"></label>
+      <button>Search</button>
+    </form>
+    {matches}
+    <details><summary class="muted">Add by coordinates instead</summary>
     <form method="post" action="/ui/places/add">
       <div class="row">
         <label>Name<input name="name" required placeholder="Mum &amp; Dad"></label>
@@ -174,7 +228,8 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap) -> Html<String
         <label>Longitude<input name="lon" type="number" step="any" min="-180" max="180" required></label>
       </div>
       <button>Add place</button>
-    </form>
+    </form></details>
+    <p class="muted">The first place is "here" on the dashboard. The frame fetches the forecast itself.</p>
   </section>
   <section><h2>Recent</h2><ul class="log">{log}</ul>
     <p class="muted">Agents connect to <code>http://{host}/mcp</code></p>
@@ -183,6 +238,7 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap) -> Html<String
 </main></html>"#,
         version = env!("CARGO_PKG_VERSION"),
         host = esc(host),
+        city = esc(city.as_deref().unwrap_or("")),
     ))
 }
 
@@ -220,7 +276,8 @@ pub async fn art_another(State(hub): State<Shared>) -> Redirect {
 pub async fn place_add(State(hub): State<Shared>, Form(place): Form<Place>) -> Redirect {
     let valid = !place.name.trim().is_empty() && (-90.0..=90.0).contains(&place.lat) && (-180.0..=180.0).contains(&place.lon);
     if valid {
-        hub.config.write().unwrap().places.push(Place { name: place.name.trim().to_owned(), ..place });
+        let timezone = place.timezone.filter(|tz| !tz.is_empty());
+        hub.config.write().unwrap().places.push(Place { name: place.name.trim().to_owned(), timezone, ..place });
         save(&hub);
     }
     Redirect::to("/")

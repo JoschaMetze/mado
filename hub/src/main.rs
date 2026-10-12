@@ -55,6 +55,9 @@ pub struct Place {
     pub name: String,
     pub lat: f64,
     pub lon: f64,
+    /// IANA name, e.g. "Asia/Tokyo"; known when the place came from the city search.
+    #[serde(default)]
+    pub timezone: Option<String>,
 }
 
 #[derive(Deserialize)]
