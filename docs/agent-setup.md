@@ -153,9 +153,17 @@ adb shell su -c 'am broadcast -a android.intent.action.BOOT_COMPLETED -n jp.co.x
 adb shell dumpsys window windows | grep mCurrentFocus    # should name jp.co.xenocode.mado
 ```
 
-On Android 10 and later the system blocks this. There, the owner can open Mado by hand after
-a power cut, or you can discuss making it the home app (a code change: add the `HOME` and
-`DEFAULT` categories to the activity's intent filter).
+The boot broadcast arrives after the launcher is already showing, and Android 10 and later
+block it altogether. To boot straight into Mado, make it the home app: it offers itself as
+one, so press Home (`adb shell input keyevent KEYCODE_HOME`) and choose Mado, then "Always".
+This changes the home app, so ask the owner first. The old launcher stays installed and the
+rail's "Home screen" entry opens it; undo the choice under Settings, Home.
+
+**The boot splash (optional).** Until Mado appears the frame still shows the vendor's logo and
+boot animation. [boot-splash.md](boot-splash.md) replaces both with Mado's. Offer it; do not
+do it unasked. It writes to `/system`, and on Rockchip frames to a boot partition, where a
+bad write leaves a frame that does not start: take the backups that page describes and get
+a yes for each part.
 
 **Keep the screen on.** The app holds the screen on while it is in front. If the frame
 sleeps anyway, check `adb shell settings get system screen_off_timeout`, and ask before
@@ -172,7 +180,8 @@ Deleting it from `/system` is not reversible without a backup. Do not do it unle
 asks, and take a copy of the APK first.
 
 **Getting out of Mado.** The frame probably has no Home button. A tap or swipe on the left
-edge of the screen opens Mado's rail, which has a "Home screen" entry. Tell the owner this.
+edge of the screen opens Mado's rail, which has a "Home screen" entry. It opens the frame's
+other launcher, also when Mado is the home app. Tell the owner this.
 
 ## Step 6: settings
 

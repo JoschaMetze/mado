@@ -79,9 +79,7 @@ class MainActivity : Activity(), HubLink.Listener {
             brightness = prefs().getFloat("brightness", 1f)
             onBrightness = ::setBrightness
             // The frame has no Home key, so the rail is the way out to the launcher.
-            onHome = {
-                startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
+            onHome = ::leaveToLauncher
         }
         setBrightness(rail.brightness)
         root = FrameLayout(this).apply {
@@ -115,6 +113,20 @@ class MainActivity : Activity(), HubLink.Listener {
         val hub = intent?.getStringExtra("hub") ?: return false
         prefs().edit().putString("hub", hub).apply()
         return true
+    }
+
+    /**
+     * Mado is a home app itself, so "home" would lead straight back here: open the other
+     * launcher by name, or Settings when Mado is the only one installed.
+     */
+    private fun leaveToLauncher() {
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val other = packageManager.queryIntentActivities(home, 0)
+            .map { it.activityInfo }
+            .firstOrNull { it.packageName != packageName }
+        val target = if (other != null) home.setClassName(other.packageName, other.name)
+        else Intent(android.provider.Settings.ACTION_SETTINGS)
+        startActivity(target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     private fun setBrightness(value: Float) {

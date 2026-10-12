@@ -65,6 +65,8 @@ hub and draws what it is told. Its clock and weather keep working when the hub i
 [docs/agent-setup.md](docs/agent-setup.md). It covers checking the device, building,
 installing, starting at power-on and wiring up MCP, and it says what the agent must ask you
 before doing.
+[docs/boot-splash.md](docs/boot-splash.md) replaces the vendor's boot logo and animation with
+Mado's, if you want the frame to be Mado from the moment it gets power.
 
 **By hand**, the short version:
 

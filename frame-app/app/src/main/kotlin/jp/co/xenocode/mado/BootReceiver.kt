@@ -5,9 +5,9 @@ import android.content.Context
 import android.content.Intent
 
 /**
- * Puts Mado on the glass when the frame powers up, without replacing the launcher.
- * Works on the old Android versions frames ship with; Android 10 and later block activities
- * started from the background, and there Mado has to be opened by hand or made the home app.
+ * Puts Mado on the glass when the frame powers up, for frames where it has not been chosen
+ * as the home app. Works on the old Android versions frames ship with; Android 10 and later
+ * block activities started from the background, and there Mado has to be the home app.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {

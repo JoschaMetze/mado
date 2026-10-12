@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A boot splash: Mado's mark in place of the vendor's power-on logo and boot animation.
+  `assets/splash.py` builds both from `assets/splash.png`; `docs/boot-splash.md` says how to
+  install them and how to go back.
+- Frame: Mado can be chosen as the home app, so the frame boots straight into it instead of
+  showing the launcher first. The rail's "Home screen" entry still opens the other launcher.
 - Art of the day can be steered: a period (before 1800, the 1800s, 1860 onwards), a subject
   (landscapes, sea and water, portraits, still lifes, flowers, animals, towns), and things
   to leave out (religious scenes, nudes, death and war). Set on the hub's page, which then
