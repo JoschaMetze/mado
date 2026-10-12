@@ -12,7 +12,8 @@ What works today:
   get a QR code for the museum's page; tap elsewhere for the next layout.
 - **Weather in a sentence.** "Rain easing by three", with the temperature and sunset. The
   frame fetches the forecast itself (Open-Meteo), so it keeps working when the hub is down.
-  Places are found by city name in the hub's web interface.
+  A second place (family elsewhere, say) gets its own line with its local time. Places are
+  found by city name in the hub's web interface.
 - **Project status.** Agents report where a project stands (`frame_project`) and the
   dashboard keeps the latest word on each.
 - **Now playing.** The album cover of whatever Apple Music is playing on your Mac, with a
@@ -26,8 +27,7 @@ What works today:
 - **The rail.** Tap or swipe the left edge of the frame for scenes, brightness and the way
   back to the launcher.
 
-Planned: weather for a second place (family elsewhere), Tama (a small on-screen companion),
-agent canvases, night mode.
+Planned: Tama (a small on-screen companion), agent canvases, night mode.
 
 ## How it fits together
 

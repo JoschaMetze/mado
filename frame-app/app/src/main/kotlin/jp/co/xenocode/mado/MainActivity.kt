@@ -142,19 +142,21 @@ class MainActivity : Activity(), HubLink.Listener {
         }
     }
 
-    // The first place in the hub's list is "here". The saved copy keeps weather working
-    // when the hub is unreachable.
+    // The first place in the hub's list is "here", the second is somewhere else that matters
+    // (family, say). The saved copy keeps weather working when the hub is unreachable.
     private fun refreshWeather() {
-        val here = try {
-            JSONObject(prefs().getString("config", null) ?: "{}").optJSONArray("places")?.optJSONObject(0)
+        val places = try {
+            JSONObject(prefs().getString("config", null) ?: "{}").optJSONArray("places")
         } catch (e: Exception) {
             null
         }
-        if (here == null) return dashboard.setWeather(null)
-        weatherSource.fetch(here.optString("name"), here.optDouble("lat"), here.optDouble("lon")) { weather ->
-            // A failed refresh keeps the last forecast on screen rather than blanking it.
-            if (weather != null) dashboard.setWeather(weather)
-        }
+        val here = places?.optJSONObject(0)
+        val away = places?.optJSONObject(1)
+        if (here == null) dashboard.setWeather(null)
+        if (away == null) dashboard.setAway(null)
+        // A failed refresh keeps the last forecast on screen rather than blanking it.
+        here?.let { p -> weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) { if (it != null) dashboard.setWeather(it) } }
+        away?.let { p -> weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) { if (it != null) dashboard.setAway(it) } }
     }
 
     /** The frame owns the date: it asks the hub for a painting once per local day. */

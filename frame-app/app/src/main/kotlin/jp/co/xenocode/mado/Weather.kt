@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -20,7 +21,12 @@ import javax.net.ssl.X509TrustManager
 import kotlin.math.roundToInt
 
 /** Today's weather for one place, already put into words. */
-class Weather(val place: String, val tempC: Int, val highC: Int, val lowC: Int, val sentence: String, val sunset: String) {
+class Weather(
+    val place: String, val tempC: Int, val highC: Int, val lowC: Int, val sentence: String, val sunset: String,
+    /** IANA timezone of the place, for showing its local time. */
+    val timezone: String,
+    val isDay: Boolean,
+) {
     val detail get() = "$tempC° now · $highC° high" + if (sunset.isEmpty()) "" else " · sunset $sunset"
 }
 
@@ -44,6 +50,9 @@ class WeatherSource(context: Context) {
         val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
         client = OkHttpClient.Builder()
             .sslSocketFactory(tls.socketFactory, trust)
+            // One request at a time. Two forecasts fetched in parallel crashed Android 6's
+            // runtime (a race inside ART's interpreter, seen in debug builds).
+            .dispatcher(Dispatcher().apply { maxRequests = 1 })
             .connectTimeout(10, TimeUnit.SECONDS)
             .build()
     }
@@ -93,6 +102,8 @@ class WeatherSource(context: Context) {
                 IntArray(chance.length()) { chance.optInt(it, 100) },
             ),
             sunset = daily.getJSONArray("sunset").optString(0).substringAfter('T', ""),
+            timezone = json.optString("timezone"),
+            isDay = current.optInt("is_day", 1) == 1,
         )
     }
 }
