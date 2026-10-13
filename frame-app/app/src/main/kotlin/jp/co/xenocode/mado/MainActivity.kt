@@ -51,6 +51,9 @@ class MainActivity : Activity(), HubLink.Listener {
     private var asleep = false
     private var peekUntil = 0L
     private var urgentShown = false
+
+    /** Sleep was asked for with music on, so that music does not keep the frame up. */
+    private var sleepOverMusic = false
     private var hubHearsNight = false
     private var shownBrightness = -1f
     private var brightnessAnimator: ValueAnimator? = null
@@ -400,6 +403,7 @@ class MainActivity : Activity(), HubLink.Listener {
     private fun sleep(on: Boolean) {
         night.force(on, minuteOfDay())
         peekUntil = 0L
+        sleepOverMusic = on && playState == "playing"
         updateNight()
     }
 
@@ -429,6 +433,7 @@ class MainActivity : Activity(), HubLink.Listener {
         if (on != nightOn) {
             nightOn = on
             rail.asleep = on
+            if (!on) sleepOverMusic = false
             reportNight()
             if (!on) {
                 // Morning: what waited through the night is said now.
@@ -441,7 +446,7 @@ class MainActivity : Activity(), HubLink.Listener {
                 nightView.waiting = 0
             }
         }
-        val sleeping = on && SystemClock.uptimeMillis() >= peekUntil && !urgentShown && playState != "playing"
+        val sleeping = on && SystemClock.uptimeMillis() >= peekUntil && !urgentShown && (playState != "playing" || sleepOverMusic)
         if (sleeping != asleep) {
             asleep = sleeping
             nightView.animate().cancel()
@@ -811,6 +816,8 @@ class MainActivity : Activity(), HubLink.Listener {
         // and those repeats must not keep pushing the trip home further away.
         if (state != playState) {
             playState = state
+            // Music that starts afresh wakes the frame again.
+            sleepOverMusic = false
             if (playing) showScene(NOW_PLAYING)
             lingerOnNowPlaying()
             updateNight()

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The rail's Sleep switch, and the hub's sleep, work while music is playing. Music used to
+  keep the frame up, so the switch did nothing. Music that starts afterwards still wakes it.
 - While a player has a track on, the dashboard names it on one small line by the date,
   fainter when paused; tap the line for now playing. It goes when the player stops.
 - Now playing has buttons for previous, play or pause, and next under the progress bar, and
