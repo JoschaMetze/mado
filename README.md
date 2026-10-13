@@ -27,10 +27,10 @@ it stays smooth on very modest hardware.
   someone taps it).
 - **Now playing.** The cover of whatever Apple Music or Spotify is playing on your Mac takes
   over the screen while music plays. A small menu bar app on the Mac does the reporting. Tap the cover to fill the screen with it; tap the text to play or
-  pause.
+  pause; "Close" in the corner goes back to the dashboard.
 - **MCP and HTTP.** Agents get tools; scripts get plain endpoints.
-- **The rail.** Tap or swipe the left edge for scenes, brightness and the way back to the
-  launcher.
+- **The rail.** Tap or swipe the left edge for scenes, the weather and projects pages,
+  brightness and the way back to the launcher.
 
 | | |
 |---|---|

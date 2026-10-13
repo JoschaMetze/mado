@@ -46,6 +46,8 @@ class ProjectsView(context: Context) : View(context) {
 
     private val scroller = OverScroller(context)
     private val autoClose = Runnable { close() }
+    private var closing = false
+    val isOpen get() = visibility == VISIBLE && !closing
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean {
             scroller.forceFinished(true)
@@ -89,6 +91,7 @@ class ProjectsView(context: Context) : View(context) {
         offset = 0f
         scroller.forceFinished(true)
         animate().cancel()
+        closing = false
         visibility = VISIBLE
         animate().alpha(1f).setDuration(FADE_MS).withLayer()
         stayOpen()
@@ -97,9 +100,13 @@ class ProjectsView(context: Context) : View(context) {
 
     fun close() {
         removeCallbacks(autoClose)
-        if (visibility != VISIBLE) return
+        if (!isOpen) return
+        closing = true
         animate().cancel()
-        animate().alpha(0f).setDuration(FADE_MS).withLayer().withEndAction { visibility = GONE }
+        animate().alpha(0f).setDuration(FADE_MS).withLayer().withEndAction {
+            visibility = GONE
+            closing = false
+        }
     }
 
     private fun stayOpen() {

@@ -24,13 +24,14 @@ import kotlin.math.sin
 /**
  * The now-playing scene: the cover, big type, and a backdrop made from the cover itself.
  * Tap the cover to let it fill the height of the glass, tap again to bring the text back;
- * tap the text to play or pause.
+ * tap the text to play or pause. "Close" in the top right corner goes back home.
  * The hub sends the backdrop tiny and already blurred, so all this does is stretch it and let
  * it drift; nothing here is expensive for the Mali-400.
  */
 class NowPlayingView(context: Context) : View(context) {
     var onPlayPause: (() -> Unit)? = null
     var onFullCover: ((Boolean) -> Unit)? = null
+    var onClose: (() -> Unit)? = null
 
     /** Just the cover, as large as the glass allows. */
     var fullCover = false
@@ -72,6 +73,15 @@ class NowPlayingView(context: Context) : View(context) {
         textSize = 15f
         letterSpacing = 0.14f
     }
+    private val closePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = WHITE
+        alpha = 204
+        typeface = Typeface.MONOSPACE
+        textSize = 13f
+        letterSpacing = 0.14f
+        textAlign = Paint.Align.RIGHT
+    }
+    private val closeZone = RectF()
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
     private val coverPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -157,6 +167,10 @@ class NowPlayingView(context: Context) : View(context) {
         canvas.drawRoundRect(coverRect, radius, radius, fill)
 
         textZones.clear()
+        // Clear of the cover even when it fills the height of the glass.
+        canvas.drawText("CLOSE ×", w - 64f, 62f, closePaint)
+        closeZone.set(w - 64f - closePaint.measureText("CLOSE ×") - 12f, 38f, w - 52f, 74f)
+        textZones.add(closeZone)
         val textAlpha = 1f - min(1f, full * 2.5f)
         if (textAlpha > 0f) drawText(canvas, h, textAlpha, full * 80f)
         if (full > 0.02f && durationS > 0) {
@@ -256,6 +270,7 @@ class NowPlayingView(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked != MotionEvent.ACTION_UP) return true
         when {
+            event.x > width - CLOSE_REACH && event.y < CLOSE_REACH / 2 -> onClose?.invoke()
             fullCover || coverRect.contains(event.x, event.y) -> {
                 fullCover = !fullCover
                 onFullCover?.invoke(fullCover)
@@ -273,5 +288,7 @@ class NowPlayingView(context: Context) : View(context) {
         const val TEXT_LEFT = 712f
         const val TEXT_W = 504
         const val FADE_MS = 900f
+        /** How far from the corner a tap still counts as "close": generous, for a finger. */
+        const val CLOSE_REACH = 220f
     }
 }

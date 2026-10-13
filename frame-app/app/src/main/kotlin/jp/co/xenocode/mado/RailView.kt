@@ -24,6 +24,8 @@ class RailView(context: Context) : View(context) {
     var onBrightness: ((Float) -> Unit)? = null
     var onHome: (() -> Unit)? = null
     var onScene: ((Int) -> Unit)? = null
+    /** About to slide in: the moment to bring `scenes` and `activeScene` up to date. */
+    var onOpening: (() -> Unit)? = null
     var onTama: ((Boolean) -> Unit)? = null
     var onTamaSound: ((Boolean) -> Unit)? = null
     var tamaShown = true
@@ -175,7 +177,11 @@ class RailView(context: Context) : View(context) {
                 downY = event.y
                 downOpen = open
                 touch = when {
-                    open < 0.01f -> if (event.x <= EDGE) Touch.DRAG else return false
+                    open < 0.01f -> {
+                        if (event.x > EDGE) return false
+                        onOpening?.invoke()
+                        Touch.DRAG
+                    }
                     event.x > W * open -> Touch.OUTSIDE
                     abs(event.y - sliderY()) < 34f -> Touch.SLIDER
                     else -> Touch.PRESS

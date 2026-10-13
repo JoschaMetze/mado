@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The now-playing scene has a "Close" in its top right corner, like the weather and projects
+  pages, and the rail lists those two pages beside the scenes.
 - Tama, the frame's companion: a small creature on the far side of the glass. It wanders
   (keeping off the words), has hobbies it picks by mood, reacts to touch, tilt and knocks,
   dresses for the weather, wears headphones while music plays, minds alerts, listens for a

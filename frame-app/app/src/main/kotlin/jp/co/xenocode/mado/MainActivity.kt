@@ -75,6 +75,10 @@ class MainActivity : Activity(), HubLink.Listener {
             fullCover = prefs().getBoolean("full_cover", false)
             onFullCover = { prefs().edit().putBoolean("full_cover", it).apply() }
             onPlayPause = { link?.send(JSONObject().put("t", "event").put("kind", "media").put("action", "playpause")) }
+            onClose = {
+                showScene(HOME)
+                lingerOnNowPlaying()
+            }
         }
         dashboard = DashboardView(this).apply {
             layout = prefs().getInt("dashboard_layout", DashboardView.FULL_BLEED)
@@ -114,16 +118,18 @@ class MainActivity : Activity(), HubLink.Listener {
                 tama.sound = it
                 prefs().edit().putBoolean("tama_sound", it).apply()
             }
-            scenes = listOf("Dashboard", "Now playing")
+            onOpening = ::markRail
             onScene = { index ->
-                showScene(index)
+                goTo(scenes[index])
                 lingerOnNowPlaying()
+                markRail()
             }
             brightness = prefs().getFloat("brightness", 1f)
             onBrightness = ::setBrightness
             // The frame has no Home key, so the rail is the way out to the launcher.
             onHome = ::leaveToLauncher
         }
+        markRail()
         setBrightness(rail.brightness)
         root = FrameLayout(this).apply {
             scenes.forEach(::addView)
@@ -407,6 +413,38 @@ class MainActivity : Activity(), HubLink.Listener {
         }
     }
 
+    /**
+     * The rail lists the scenes and then the dashboard's pages, each page only while it has
+     * something to show. Nothing sees the list while the rail is shut, so it is made when it opens.
+     */
+    private fun markRail() {
+        val rows = listOfNotNull(
+            DASHBOARD_ROW, NOW_PLAYING_ROW,
+            WEATHER_ROW.takeIf { weatherPlaces().isNotEmpty() }, PROJECTS_ROW.takeIf { projectList.isNotEmpty() },
+        )
+        rail.scenes = rows
+        rail.activeScene = rows.indexOf(
+            when {
+                weatherPage.isOpen -> WEATHER_ROW
+                projectsPage.isOpen -> PROJECTS_ROW
+                scene == NOW_PLAYING -> NOW_PLAYING_ROW
+                else -> DASHBOARD_ROW
+            }
+        )
+    }
+
+    private fun goTo(row: String) {
+        if (row == NOW_PLAYING_ROW) return showScene(NOW_PLAYING)
+        // The pages lie over the dashboard, and only one of them at a time.
+        showScene(DASHBOARD)
+        if (row != PROJECTS_ROW) projectsPage.close()
+        if (row != WEATHER_ROW) weatherPage.close()
+        when (row) {
+            WEATHER_ROW -> if (!weatherPage.isOpen) weatherPage.open(here, root.width / 2f, root.height / 2f)
+            PROJECTS_ROW -> if (!projectsPage.isOpen) projectsPage.open()
+        }
+    }
+
     private fun showScene(index: Int) {
         if (index == scene) return
         projectsPage.close()
@@ -515,6 +553,10 @@ class MainActivity : Activity(), HubLink.Listener {
     private companion object {
         const val DASHBOARD = 0
         const val NOW_PLAYING = 1
+        const val DASHBOARD_ROW = "Dashboard"
+        const val NOW_PLAYING_ROW = "Now playing"
+        const val WEATHER_ROW = "Weather"
+        const val PROJECTS_ROW = "Projects"
         /** Where the stage rests when nothing else wants it. */
         const val HOME = DASHBOARD
         const val SCENE_FADE_MS = 700L
