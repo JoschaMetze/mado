@@ -37,6 +37,9 @@ class MainActivity : Activity(), HubLink.Listener {
     private lateinit var dashboard: DashboardView
     private lateinit var projectsPage: ProjectsView
     private lateinit var weatherPage: WeatherView
+    private lateinit var messagesPage: MessagesView
+    /** Everything the frame has been sent, kept across restarts for the messages page. */
+    private val messages = MessageLog()
     private lateinit var nightView: NightView
     private val night = NightClock()
     /** Night mode is in force; `asleep` is that and nothing keeping the frame up for the moment. */
@@ -98,6 +101,8 @@ class MainActivity : Activity(), HubLink.Listener {
                 tama.alertGone()
                 urgentShown = false
                 updateNight()
+                messages.left(alert.id, alert.level, reason)
+                messagesChanged()
                 link?.send(JSONObject().put("t", "event").put("kind", "dismissed").put("id", alert.id).put("reason", reason))
             }
         }
@@ -121,6 +126,8 @@ class MainActivity : Activity(), HubLink.Listener {
         weatherPage = WeatherView(this).apply {
             onCover = { covered -> scenes[scene].visibility = if (covered) View.INVISIBLE else View.VISIBLE }
         }
+        messages.restore(getSharedPreferences("messages", MODE_PRIVATE).getString("log", null))
+        messagesPage = MessagesView(this).apply { setMessages(messages.all) }
         scenes = listOf(dashboard, nowPlaying)
         tama = TamaView(this).apply {
             visibility = if (prefs().getBoolean("tama", true)) View.VISIBLE else View.GONE
@@ -172,6 +179,7 @@ class MainActivity : Activity(), HubLink.Listener {
             scenes.forEach(::addView)
             addView(projectsPage)
             addView(weatherPage)
+            addView(messagesPage)
             addView(nightView)
             addView(tama)
             addView(alerts)
@@ -304,8 +312,12 @@ class MainActivity : Activity(), HubLink.Listener {
             reportNight()
             if (!on) {
                 // Morning: what waited through the night is said now.
-                held.forEach(alerts::show)
+                held.forEach {
+                    messages.released(it.id)
+                    alerts.show(it)
+                }
                 held.clear()
+                messagesChanged()
                 nightView.waiting = 0
             }
         }
@@ -317,6 +329,7 @@ class MainActivity : Activity(), HubLink.Listener {
             if (sleeping) {
                 projectsPage.close()
                 weatherPage.close()
+                messagesPage.close()
                 nightView.visibility = View.VISIBLE
                 nightView.animate().alpha(1f).setDuration(NIGHT_FADE_MS).withLayer()
                 // Tama sleeps on, but not as a bright spot in a dark room.
@@ -478,6 +491,7 @@ class MainActivity : Activity(), HubLink.Listener {
                     dashboard.setArt(art)
                     tama.notice()
                     projectsPage.setArt(art)
+                    messagesPage.setArt(art)
                 }
             }
         }
@@ -539,9 +553,12 @@ class MainActivity : Activity(), HubLink.Listener {
                     source = if (msg.isNull("source")) null else msg.optString("source"),
                     ttlMs = msg.optLong("ttl_s") * 1000,
                 )
+                val wait = nightOn && alert.level != "urgent"
+                messages.arrived(alert.id, alert.level, alert.text, alert.source, System.currentTimeMillis(), wait)
+                messagesChanged()
                 // At night only urgent is shown; the rest waits for the morning, the newest few of it.
-                if (nightOn && alert.level != "urgent") {
-                    if (held.size == MAX_HELD) held.removeAt(0)
+                if (wait) {
+                    if (held.size == MAX_HELD) messages.dropped(held.removeAt(0).id)
                     held.add(alert)
                     nightView.waiting = held.size
                     link?.send(JSONObject().put("t", "event").put("kind", "held").put("id", alert.id))
@@ -574,6 +591,11 @@ class MainActivity : Activity(), HubLink.Listener {
         }
     }
 
+    private fun messagesChanged() {
+        getSharedPreferences("messages", MODE_PRIVATE).edit().putString("log", messages.text()).apply()
+        messagesPage.setMessages(messages.all)
+    }
+
     /**
      * The rail lists the scenes and then the dashboard's pages, each page only while it has
      * something to show. Nothing sees the list while the rail is shut, so it is made when it opens.
@@ -582,12 +604,14 @@ class MainActivity : Activity(), HubLink.Listener {
         val rows = listOfNotNull(
             DASHBOARD_ROW, NOW_PLAYING_ROW,
             WEATHER_ROW.takeIf { weatherPlaces().isNotEmpty() }, PROJECTS_ROW.takeIf { projectList.isNotEmpty() },
+            MESSAGES_ROW.takeIf { messages.all.isNotEmpty() },
         )
         rail.scenes = rows
         rail.activeScene = rows.indexOf(
             when {
                 weatherPage.isOpen -> WEATHER_ROW
                 projectsPage.isOpen -> PROJECTS_ROW
+                messagesPage.isOpen -> MESSAGES_ROW
                 scene == NOW_PLAYING -> NOW_PLAYING_ROW
                 else -> DASHBOARD_ROW
             }
@@ -600,9 +624,11 @@ class MainActivity : Activity(), HubLink.Listener {
         showScene(DASHBOARD)
         if (row != PROJECTS_ROW) projectsPage.close()
         if (row != WEATHER_ROW) weatherPage.close()
+        if (row != MESSAGES_ROW) messagesPage.close()
         when (row) {
             WEATHER_ROW -> if (!weatherPage.isOpen) weatherPage.open(here, root.width / 2f, root.height / 2f)
             PROJECTS_ROW -> if (!projectsPage.isOpen) projectsPage.open()
+            MESSAGES_ROW -> if (!messagesPage.isOpen) messagesPage.open()
         }
     }
 
@@ -610,6 +636,7 @@ class MainActivity : Activity(), HubLink.Listener {
         if (index == scene) return
         projectsPage.close()
         weatherPage.close()
+        messagesPage.close()
         val leaving = scenes[scene]
         val arriving = scenes[index]
         scene = index
@@ -721,6 +748,7 @@ class MainActivity : Activity(), HubLink.Listener {
         const val NOW_PLAYING_ROW = "Now playing"
         const val WEATHER_ROW = "Weather"
         const val PROJECTS_ROW = "Projects"
+        const val MESSAGES_ROW = "Messages"
         /** Where the stage rests when nothing else wants it. */
         const val HOME = DASHBOARD
         const val SCENE_FADE_MS = 700L

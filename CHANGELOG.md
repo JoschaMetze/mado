@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A messages page, opened from the rail: every alert the frame has been sent, newest first,
+  with who sent it, when, and what became of it (read, left by itself, never opened, kept
+  for the morning, never shown). The frame keeps the last 200 across restarts.
 - Art of the day has more to choose from. The hub's page takes any mix of three sources (the
   Art Institute of Chicago, the Cleveland Museum of Art, and WikiArt's 600 most viewed
   paintings) and of four kinds of work (paintings, prints, drawings and watercolours,

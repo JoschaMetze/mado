@@ -277,7 +277,7 @@ class RailView(context: Context) : View(context) {
         private const val PAD = 28f
         private const val EDGE = 64f
         private const val TAP_SLOP = 14f
-        private const val ROW_H = 60f
+        private const val ROW_H = 54f
         private const val ROW_STEP = ROW_H + 6f
         /** The switches under the slider sit closer together than the scenes, to leave the hub its corner. */
         private const val LOW_STEP = 56f
