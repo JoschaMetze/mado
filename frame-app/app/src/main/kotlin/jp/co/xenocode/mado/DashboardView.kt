@@ -32,8 +32,17 @@ import kotlin.math.min
  * It is still unless something changes: one redraw a minute for the clock.
  */
 class DashboardView(context: Context) : View(context) {
-    /** `updated` is in seconds since the epoch, 0 when the hub did not say. */
-    class Project(val name: String, val status: String, val note: String, val progress: Float?, val updated: Long = 0)
+    /**
+     * `updated` is in seconds since the epoch, 0 when the hub did not say. `iconKey` names the
+     * project's picture on the hub ("" when it has none) and `icon` is that picture once it has
+     * been fetched; until then, and without one, `initials` are drawn on a disc of `tint`.
+     */
+    class Project(
+        val name: String, val status: String, val note: String, val progress: Float?, val updated: Long = 0,
+        val initials: String = "", val tint: Int = Color.GRAY, val iconKey: String = "",
+    ) {
+        var icon: Bitmap? = null
+    }
 
     class Art(
         val title: String, val artist: String, val date: String, val medium: String, val credit: String,
@@ -80,6 +89,7 @@ class DashboardView(context: Context) : View(context) {
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val picture = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+    private val letters = TextPaint(Paint.ANTI_ALIAS_FLAG)
     private val scrimTop = Paint()
     private val scrimBottom = Paint()
     private val src = Rect()
@@ -239,12 +249,14 @@ class DashboardView(context: Context) : View(context) {
         var y = 62f
         for (p in projects) {
             val head = "${p.name} · ${word(p.status)}"
-            canvas.drawText(head, w - 52f, y, type(20f, bold, WHITE, align = Paint.Align.RIGHT, shadow = true))
-            drawMark(canvas, p.status, w - 52f - text.measureText(head) - 20f, y - 7f)
-            canvas.drawText(fit(p.note, type(17f, sans, WHITE, 0.8f, align = Paint.Align.RIGHT, shadow = true), 420f), w - 52f, y + 24f, text)
+            val edge = w - 52f - 38f - 14f
+            drawIcon(canvas, p, w - 52f - 38f, y - 12f, 38f)
+            canvas.drawText(head, edge, y, type(20f, bold, WHITE, align = Paint.Align.RIGHT, shadow = true))
+            drawMark(canvas, p.status, edge - text.measureText(head) - 20f, y - 7f)
+            canvas.drawText(fit(p.note, type(17f, sans, WHITE, 0.8f, align = Paint.Align.RIGHT, shadow = true), 420f), edge, y + 24f, text)
             y += 62f
         }
-        if (projects.isNotEmpty()) studio.set(w - 512f, 24f, w, y - 14f)
+        if (projects.isNotEmpty()) studio.set(w - 564f, 24f, w, y - 14f)
 
         val time = clock.format(now)
         canvas.drawText(time, 40f, h - 44f, type(186f, thin, WHITE, spacing = -0.02f, shadow = true))
@@ -326,11 +338,12 @@ class DashboardView(context: Context) : View(context) {
         if (projects.isNotEmpty() && top - 30f - sectionEnd >= 34f) canvas.drawText("IN THE STUDIO", x, top - 30f, mono(art.paper, 0.55f, 14f))
         var y = top
         for (p in projects) {
-            drawMark(canvas, p.status, x + 7f, y + 13f)
-            canvas.drawText(p.name, x + 30f, y + 20f, type(21f, bold, art.paper))
-            val after = x + 30f + text.measureText(p.name)
+            drawIcon(canvas, p, x, y + 7f, 38f)
+            drawMark(canvas, p.status, x + 59f, y + 13f)
+            canvas.drawText(p.name, x + 82f, y + 20f, type(21f, bold, art.paper))
+            val after = x + 82f + text.measureText(p.name)
             canvas.drawText(" · ${word(p.status)}", after, y + 20f, type(21f, sans, art.paper, 0.85f))
-            canvas.drawText(fit(p.note, type(17f, sans, art.paper, 0.68f), right - x - 30f), x + 30f, y + 44f, text)
+            canvas.drawText(fit(p.note, type(17f, sans, art.paper, 0.68f), right - x - 82f), x + 82f, y + 44f, text)
             y += 62f
         }
         if (projects.isNotEmpty()) studio.set(x - 16f, top - 16f, w, y + 10f)
@@ -368,9 +381,10 @@ class DashboardView(context: Context) : View(context) {
         quiet(split, 0f, w, h)
         var y = h - 40f - projects.size * 58f
         projects.forEachIndexed { i, p ->
-            drawMark(canvas, p.status, x + 7f, y + 12f)
-            canvas.drawText(p.name, x + 28f, y + 18f, type(18f, bold, art.paper))
-            val after = x + 28f + text.measureText(p.name)
+            drawIcon(canvas, p, x, y - 2f, 28f)
+            drawMark(canvas, p.status, x + 45f, y + 12f)
+            canvas.drawText(p.name, x + 66f, y + 18f, type(18f, bold, art.paper))
+            val after = x + 66f + text.measureText(p.name)
             canvas.drawText(fit(" · ${p.note}", type(18f, sans, art.paper, 0.75f), right - after), after, y + 18f, text)
             // Progress as a brush stroke in one of the painting's own pigments.
             line.strokeCap = Paint.Cap.ROUND
@@ -444,6 +458,7 @@ class DashboardView(context: Context) : View(context) {
                 canvas.translate(left + 26f, top)
                 note.draw(canvas)
                 canvas.restore()
+                drawIcon(canvas, p, left + 26f, top - 92f, 44f)
                 drawMark(canvas, p.status, left + 33f, top - 22f)
                 canvas.drawText(fit(p.name, type(25f, bold, on), right - left - 80f), left + 52f, top - 13f, text)
             }
@@ -506,6 +521,8 @@ class DashboardView(context: Context) : View(context) {
     }
 
     private fun drawMark(canvas: Canvas, status: String, cx: Float, cy: Float) = mark(canvas, status, cx, cy, 6.5f, fill, line)
+
+    private fun drawIcon(canvas: Canvas, p: Project, left: Float, top: Float, size: Float) = icon(canvas, p, left, top, size, fill, letters, picture)
 
     private fun word(status: String) = status.replace('_', ' ')
 
@@ -608,6 +625,32 @@ class DashboardView(context: Context) : View(context) {
                     canvas.drawCircle(cx, cy, r, fill)
                 }
             }
+        }
+
+        private val iconBox = RectF()
+
+        /**
+         * What a project is recognised by, in a square: its own picture, or its initials on a
+         * disc of its colour. `fill`, `letters` and `picture` are the caller's paints for
+         * shapes, text and bitmaps; `letters` is overwritten.
+         */
+        fun icon(canvas: Canvas, p: Project, left: Float, top: Float, size: Float, fill: Paint, letters: TextPaint, picture: Paint) {
+            val image = p.icon
+            if (image != null) {
+                val scale = min(size / image.width, size / image.height)
+                val cx = left + size / 2
+                val cy = top + size / 2
+                iconBox.set(cx - image.width * scale / 2, cy - image.height * scale / 2, cx + image.width * scale / 2, cy + image.height * scale / 2)
+                canvas.drawBitmap(image, null, iconBox, picture)
+                return
+            }
+            fill.color = p.tint
+            canvas.drawCircle(left + size / 2, top + size / 2, size / 2, fill)
+            letters.textSize = size * if (p.initials.length > 1) 0.42f else 0.5f
+            letters.typeface = Typeface.DEFAULT_BOLD
+            letters.color = WHITE
+            letters.textAlign = Paint.Align.CENTER
+            canvas.drawText(p.initials, left + size / 2, top + size / 2 - (letters.ascent() + letters.descent()) / 2, letters)
         }
 
         fun luminance(c: Int) = (0.299f * Color.red(c) + 0.587f * Color.green(c) + 0.114f * Color.blue(c)) / 255f

@@ -19,8 +19,8 @@ it stays smooth on very modest hardware.
   places you care about get a line each, with their local time. The frame fetches forecasts
   itself, so weather keeps working when the hub is down.
 - **Project status from your agents.** An agent reports where a project stands and the
-  dashboard keeps the latest word on each. Tap them for a page of every project with its
-  whole note.
+  dashboard keeps the latest word on each, beside its icon (or its initials, if it has
+  none). Tap them for a page of every project with its whole note.
 - **Liquid alerts.** Anything on your network can put a message on the glass: a *whisper*
   (a bead at the edge), a *nudge* (one line that drains away) or *urgent* (stays until
   someone taps it).
@@ -125,7 +125,7 @@ curl -X POST http://HOST:7878/api/notify \
 |---|---|
 | `POST /api/notify` | `text`, optional `level` (`whisper`, `nudge`, `urgent`), `source`, `ttl_s` (urgent ignores it and stays until tapped) |
 | `POST /api/companion` | `action` (as for `frame_companion` below), optional `ttl_s` for a mood or hiding, `source` |
-| `POST /api/project` | `name`, `status` (`on_track`, `needs_you`, `blocked`, `done`, `archived`), optional `note`, `progress` 0 to 1 |
+| `POST /api/project` | `name`, `status` (`on_track`, `needs_you`, `blocked`, `done`, `archived`), optional `note`, `progress` 0 to 1, and `icon` (the URL of a PNG or JPEG, or the image in base64). Send the icon once: later reports keep it, and `""` removes it. |
 | `GET /api/look` | JPEG of what the frame is showing |
 | `GET /api/state` | Connected frames, now playing, today's painting, projects, config, recent activity |
 | `POST /api/now_playing` | What a player is doing: `state` (`playing`, `paused`, `stopped`), `title`, `artist`, `album`, `source`, `position_s`, `duration_s`, and `art_b64` (the cover, JPEG or PNG) when the track changes. Repeat it at least every 30 seconds while playing. |

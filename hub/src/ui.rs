@@ -3,7 +3,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
-    extract::{Query, State},
+    extract::{Multipart, Query, State},
     http::HeaderMap,
     response::{Html, Redirect},
     Form,
@@ -179,18 +179,34 @@ fn project_rows(items: &Value) -> String {
             let bar = percent.map_or(String::new(), |pc| {
                 format!(r#"<div class="bar" title="{pc}%"><i style="width:{pc}%"></i></div>"#)
             });
+            // The icon's name is the hub's own, but the page trusts nothing it did not write.
+            let key = p["icon"].as_str().filter(|k| k.bytes().all(|b| b.is_ascii_hexdigit()));
+            let icon = match key {
+                Some(key) => format!(r#"<img class="icon" src="/icons/{key}.png" alt="">"#),
+                None => format!(
+                    r#"<span class="icon" style="background:{}">{}</span>"#,
+                    colour(&p["tint"], "#5b6876"),
+                    esc(p["initials"].as_str().unwrap_or(""))
+                ),
+            };
+            let no_icon = if key.is_some() {
+                r#"<label class="check"><input type="checkbox" name="no_icon" value="1">Go back to initials</label>"#
+            } else {
+                ""
+            };
             let note_line = if note.is_empty() {
                 String::new()
             } else {
                 format!(r#"<p class="muted">{note}</p>"#)
             };
             format!(
-                r#"<li class="project"><div class="line"><b class="grow">{name}</b><span class="badge {class}">{label}</span></div>
+                r#"<li class="project"><div class="line">{icon}<b class="grow">{name}</b><span class="badge {class}">{label}</span></div>
 {note_line}{bar}
-<details><summary>Updated {updated} · edit</summary><form method="post" action="/ui/projects"><input type="hidden" name="name" value="{name}">
+<details><summary>Updated {updated} · edit</summary><form method="post" action="/ui/projects" enctype="multipart/form-data"><input type="hidden" name="name" value="{name}">
 <div class="row"><label>Status<select name="status">{options}</select></label>
 <label>Progress, %<input name="progress" type="number" min="0" max="100" value="{percent}" placeholder="none"></label></div>
 <label>Note<input name="note" maxlength="120" value="{note}"></label>
+<label>Icon<input name="icon" type="file" accept="image/png,image/jpeg"></label>{no_icon}
 <div class="actions"><button>Save</button><button class="quiet" name="remove" value="yes">Remove from the dashboard</button></div></form></details></li>"#,
                 class = if projects::STATUSES.contains(&status) { status } else { "plain" },
                 label = esc(&status.replace('_', " ")),
@@ -499,10 +515,11 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
   <section id="projects"><div class="head"><p class="eyebrow">On the dashboard</p><h2>Projects</h2></div>
     <ul class="rows">{projects}</ul>
     <details><summary>Add a project</summary>
-    <form method="post" action="/ui/projects">
+    <form method="post" action="/ui/projects" enctype="multipart/form-data">
       <div class="row"><label>Name<input name="name" maxlength="40" required></label>
       <label>Status<select name="status">{statuses}</select></label></div>
       <label>Note<input name="note" maxlength="120"></label>
+      <label>Icon, a PNG or JPEG; without one it gets its initials<input name="icon" type="file" accept="image/png,image/jpeg"></label>
       <button>Add project</button>
     </form></details>
   </section>
@@ -568,31 +585,71 @@ pub async fn notify(State(hub): State<Shared>, Form(n): Form<Notify>) -> Redirec
     back("alert", hub.notify(n).map(|_| "Sent to the frame."))
 }
 
-#[derive(Deserialize)]
-pub struct ProjectForm {
+#[derive(Default)]
+struct ProjectForm {
     name: String,
     status: String,
-    #[serde(default)]
     note: String,
     /// A percentage; empty means the project has no progress bar.
-    #[serde(default)]
     progress: String,
     /// Set by the Remove button, which shares a form with Save.
-    remove: Option<String>,
+    remove: bool,
+    /// The picture chosen as the icon; empty when none was.
+    icon: Vec<u8>,
+    no_icon: bool,
 }
 
-pub async fn project(State(hub): State<Shared>, Form(f): Form<ProjectForm>) -> Redirect {
+/// The project forms carry a file, so they arrive in parts rather than as one query string.
+async fn project_form(mut parts: Multipart) -> Result<ProjectForm, String> {
+    const UNREADABLE: &str = "That could not be read. An icon can be up to 4 MB.";
+    let mut f = ProjectForm::default();
+    while let Some(part) = parts.next_field().await.map_err(|_| UNREADABLE)? {
+        let name = part.name().unwrap_or("").to_owned();
+        if name == "icon" {
+            f.icon = part.bytes().await.map_err(|_| UNREADABLE)?.to_vec();
+            continue;
+        }
+        let value = part.text().await.map_err(|_| UNREADABLE)?;
+        match name.as_str() {
+            "name" => f.name = value,
+            "status" => f.status = value,
+            "note" => f.note = value,
+            "progress" => f.progress = value,
+            "remove" => f.remove = true,
+            "no_icon" => f.no_icon = true,
+            _ => {}
+        }
+    }
+    Ok(f)
+}
+
+pub async fn project(State(hub): State<Shared>, parts: Multipart) -> Redirect {
+    let f = match project_form(parts).await {
+        Ok(f) => f,
+        Err(e) => return back("projects", Err(e)),
+    };
     let (status, done) = match f.remove {
-        Some(_) => (projects::ARCHIVED.to_owned(), "Project removed."),
-        None => (f.status, "Project saved."),
+        true => (projects::ARCHIVED.to_owned(), "Project removed."),
+        false => (f.status, "Project saved."),
+    };
+    let icon = if f.no_icon || f.remove {
+        projects::Icon::Clear
+    } else if f.icon.is_empty() {
+        projects::Icon::Keep
+    } else {
+        match tokio::task::spawn_blocking(move || projects::prepare_icon(&f.icon)).await {
+            Ok(Ok(png)) => projects::Icon::Set(png),
+            _ => return back("projects", Err("The icon must be a PNG or JPEG.".into())),
+        }
     };
     let update = projects::Update {
         name: f.name,
         status,
         note: f.note,
         progress: f.progress.trim().parse::<f64>().ok().map(|percent| percent / 100.0),
+        icon: None,
     };
-    back("projects", hub.update_project(update).map(|_| done))
+    back("projects", hub.update_project(update, icon).map(|_| done))
 }
 
 pub async fn art_another(State(hub): State<Shared>) -> Redirect {

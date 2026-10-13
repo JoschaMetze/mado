@@ -9,6 +9,9 @@
   hide it and mute it; it is silent unless its sounds are switched on.
 - `frame_companion` and `POST /api/companion` ask Tama for a gesture, a mood or a hobby, and
   `frame_state` says what it is doing.
+- Projects can have an icon, so they are recognised at a glance: `frame_project` and
+  `POST /api/project` take `icon` (the URL of a PNG or JPEG, or the image in base64), and the
+  hub's page takes an upload. A project without one gets its initials on a coloured disc.
 - A boot splash: Mado's mark in place of the vendor's power-on logo and boot animation.
   `assets/splash.py` builds both from `assets/splash.png`; `docs/boot-splash.md` says how to
   install them and how to go back.

@@ -31,6 +31,10 @@ class MainActivity : Activity(), HubLink.Listener {
     private lateinit var nowPlaying: NowPlayingView
     private lateinit var dashboard: DashboardView
     private lateinit var projectsPage: ProjectsView
+    private var projectList: List<DashboardView.Project> = emptyList()
+    /** Project icons by the hub's name for them; a new picture has a new name. */
+    private val projectIcons = HashMap<String, Bitmap>()
+    private var fetchingIcons = false
     private lateinit var scenes: List<View>
     private var scene = DASHBOARD
     private var artVersion = -1L
@@ -306,10 +310,41 @@ class MainActivity : Activity(), HubLink.Listener {
                     p.optString("name"), p.optString("status"), p.optString("note"),
                     if (p.isNull("progress")) null else p.optDouble("progress").toFloat(),
                     p.optLong("updated"),
-                )
+                    // A hub from before icons sends neither initials nor a colour.
+                    p.optString("initials").ifEmpty { p.optString("name").trim().take(1).uppercase() },
+                    try {
+                        Color.parseColor(p.optString("tint"))
+                    } catch (e: RuntimeException) {
+                        Color.GRAY
+                    },
+                    if (p.isNull("icon")) "" else p.optString("icon"),
+                ).also { it.icon = projectIcons[it.iconKey] }
             }
+        projectList = all
+        projectIcons.keys.retainAll(all.map { it.iconKey }.toSet())
         dashboard.setProjects(all)
         projectsPage.setProjects(all)
+        if (!fetchingIcons) fetchIcons(HashSet())
+    }
+
+    /**
+     * Fetch the project icons the frame does not have yet, one at a time. `tried` holds the
+     * ones already asked for in this run, so an icon the hub cannot give is not asked for twice.
+     */
+    private fun fetchIcons(tried: HashSet<String>) {
+        val key = projectList.map { it.iconKey }.firstOrNull { it.isNotEmpty() && it !in projectIcons && tried.add(it) }
+        val link = link
+        fetchingIcons = key != null && link != null
+        if (key == null || link == null) return
+        link.fetch("/icons/$key.png") { bytes ->
+            bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.let { icon ->
+                projectIcons[key] = icon
+                projectList.filter { it.iconKey == key }.forEach { it.icon = icon }
+                dashboard.invalidate()
+                projectsPage.invalidate()
+            }
+            fetchIcons(tried)
+        }
     }
 
     override fun onHubMessage(msg: JSONObject) {

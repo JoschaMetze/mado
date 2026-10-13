@@ -39,6 +39,8 @@ class ProjectsView(context: Context) : View(context) {
         typeface = sans
     }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val letters = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private val picture = Paint(Paint.FILTER_BITMAP_FLAG)
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val path = Path()
 
@@ -195,7 +197,8 @@ class ProjectsView(context: Context) : View(context) {
     private fun drawRow(canvas: Canvas, row: Row, index: Int, left: Float, right: Float, y: Float, nowS: Long) {
         val p = row.project
         val x = left + INDENT
-        DashboardView.mark(canvas, p.status, left + 10f, y + 39f, 9f, fill, line)
+        DashboardView.icon(canvas, p, left, y + 17f, ICON, fill, letters, picture)
+        DashboardView.mark(canvas, p.status, left + ICON + 24f, y + 39f, 9f, fill, line)
         canvas.drawText(p.name, x, y + 50f, type(30f, bold))
 
         val progress = progress(p)
@@ -246,7 +249,9 @@ class ProjectsView(context: Context) : View(context) {
 
     private companion object {
         const val MARGIN = 96f
-        const val INDENT = 38f
+        const val ICON = 44f
+        /** Where a row's words start: past its icon and its status mark. */
+        const val INDENT = ICON + 52f
         /** Kept clear on the right of each row for its status and age. */
         const val SIDE_W = 280f
         const val LIST_TOP = 158f

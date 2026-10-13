@@ -82,14 +82,16 @@ fn tools() -> Value {
             "name": "frame_project",
             "description": "Report where a project stands. The frame's dashboard lists the latest report per project, \
                 so call this when a piece of work finishes, gets blocked, or needs the owner. \
-                Reuse the exact project name to update it; status archived takes it off the dashboard.",
+                Reuse the exact project name to update it; status archived takes it off the dashboard. \
+                Give it an icon the first time so the owner recognises it at a glance.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": { "type": "string", "description": "Short project name, at most 40 characters." },
                     "status": { "type": "string", "enum": ["on_track", "needs_you", "blocked", "done", "archived"] },
                     "note": { "type": "string", "description": "One short line on where it stands, at most 120 characters." },
-                    "progress": { "type": "number", "minimum": 0, "maximum": 1, "description": "Optional fraction complete." }
+                    "progress": { "type": "number", "minimum": 0, "maximum": 1, "description": "Optional fraction complete." },
+                    "icon": { "type": "string", "description": "Optional picture to recognise the project by: the http(s) URL of a PNG or JPEG (a logo, an app icon), or the image itself in base64. Send it once; later reports keep it, and an empty string removes it. Without one the frame shows the project's initials on a coloured disc." }
                 },
                 "required": ["name", "status"]
             }
@@ -131,10 +133,10 @@ async fn call(hub: &Shared, params: &Value) -> Value {
             .map_err(|e| e.to_string())
             .and_then(|n| hub.notify(n))
             .map(text),
-        "frame_project" => serde_json::from_value::<projects::Update>(args)
-            .map_err(|e| e.to_string())
-            .and_then(|u| hub.update_project(u))
-            .map(text),
+        "frame_project" => match serde_json::from_value::<projects::Update>(args) {
+            Ok(update) => projects::report(hub, update).await.map(text),
+            Err(e) => Err(e.to_string()),
+        },
         "frame_companion" => serde_json::from_value::<Companion>(args)
             .map_err(|e| e.to_string())
             .and_then(|c| hub.companion(c))

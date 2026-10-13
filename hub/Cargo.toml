@@ -7,7 +7,7 @@ repository = "https://github.com/abradburne/mado"
 description = "Hub for Mado frames: relays alerts, scenes and screenshots between senders (HTTP, MCP) and the frame."
 
 [dependencies]
-axum = { version = "0.8", features = ["ws"] }
+axum = { version = "0.8", features = ["ws", "multipart"] }
 base64 = "0.22"
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

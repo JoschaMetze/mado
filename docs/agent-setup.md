@@ -190,7 +190,8 @@ through it rather than editing files:
 
 - **Weather places.** Search by city. The first place is "here"; others get a line each with
   their local time, and can be renamed ("Mum & Dad").
-- **Projects.** Added by agents through `frame_project`, or by hand here.
+- **Projects.** Added by agents through `frame_project`, or by hand here. Each can be given
+  an icon; without one it shows its initials.
 - **Art of the day.** "Another painting" picks a different one for today.
 
 ## Step 7: connect agents

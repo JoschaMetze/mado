@@ -414,7 +414,8 @@ async fn main() {
     let frame_routes = Router::new()
         .route("/frame", get(frame_ws))
         .route("/art/{version}/{file}", get(nowplaying::art))
-        .route("/daily/{version}/{file}", get(art::file));
+        .route("/daily/{version}/{file}", get(art::file))
+        .route("/icons/{file}", get(projects::icon_file));
 
     let app = Router::new()
         .route("/", get(ui::index))
@@ -425,7 +426,7 @@ async fn main() {
         .route("/ui/places/remove", post(ui::place_remove))
         .route("/ui/places/rename", post(ui::place_rename))
         .route("/ui/places/here", post(ui::place_here))
-        .route("/ui/projects", post(ui::project))
+        .route("/ui/projects", post(ui::project).layer(DefaultBodyLimit::max(6 << 20)))
         .route("/ui/art/another", post(ui::art_another))
         .route("/ui/art/prefs", post(ui::art_prefs))
         .route("/ui/theme", post(ui::theme))
@@ -438,7 +439,10 @@ async fn main() {
             post(nowplaying::post).layer(DefaultBodyLimit::max(12 << 20)),
         )
         .route("/api/now_playing/commands", get(nowplaying::commands))
-        .route("/api/project", post(projects::post))
+        .route(
+            "/api/project",
+            post(projects::post).layer(DefaultBodyLimit::max(6 << 20)),
+        )
         .route("/mcp", post(mcp::handle))
         .merge(frame_routes.clone())
         .with_state(hub.clone());
@@ -539,10 +543,12 @@ mod tests {
             status: status.into(),
             note: String::new(),
             progress: Some(7.0),
+            icon: None,
         };
-        hub.update_project(update("b", "on_track")).unwrap();
-        hub.update_project(update("a", "done")).unwrap();
-        hub.update_project(update("c", "needs_you")).unwrap();
+        let report = |name: &str, status: &str| hub.update_project(update(name, status), projects::Icon::Keep);
+        report("b", "on_track").unwrap();
+        report("a", "done").unwrap();
+        report("c", "needs_you").unwrap();
         let items = hub.projects_message()["items"].take();
         let names: Vec<&str> = items
             .as_array()
@@ -553,9 +559,38 @@ mod tests {
         assert_eq!(names, ["c", "b", "a"]);
         assert_eq!(items[0]["progress"], 1.0);
 
-        hub.update_project(update("C", "archived")).unwrap();
+        report("C", "archived").unwrap();
         assert_eq!(hub.projects_message()["items"].as_array().unwrap().len(), 2);
-        assert!(hub.update_project(update("b", "paused")).is_err());
+        assert!(report("b", "paused").is_err());
+        let _ = std::fs::remove_dir_all(&hub.data_dir);
+    }
+
+    #[test]
+    fn a_project_keeps_its_icon_until_told_otherwise() {
+        let hub = Hub::load(std::env::temp_dir().join(format!("mado-test-icons-{}", std::process::id())));
+        let report = |icon| {
+            let update = projects::Update {
+                name: "Mado".into(),
+                status: "on_track".into(),
+                note: String::new(),
+                progress: None,
+                icon: None,
+            };
+            hub.update_project(update, icon).unwrap();
+            hub.projects_message()["items"][0].take()
+        };
+        let first = report(projects::Icon::Set(b"one".to_vec()));
+        let key = first["icon"].as_str().unwrap().to_owned();
+        let file = |key: &str| hub.data_dir.join("icons").join(format!("{key}.png"));
+        assert!(file(&key).exists());
+        assert_eq!(first["initials"], "Ma");
+
+        assert_eq!(report(projects::Icon::Keep)["icon"], key.as_str());
+        let second = report(projects::Icon::Set(b"two".to_vec()));
+        assert_ne!(second["icon"], key.as_str());
+        assert!(!file(&key).exists());
+        assert!(report(projects::Icon::Clear)["icon"].is_null());
+        assert!(!file(second["icon"].as_str().unwrap()).exists());
         let _ = std::fs::remove_dir_all(&hub.data_dir);
     }
 }
