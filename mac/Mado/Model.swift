@@ -146,7 +146,7 @@ final class Model: ObservableObject {
         }
     }
 
-    /// Taps on the frame (play, pause) arrive through a long poll and go to whichever
+    /// Taps on the frame (play or pause, next, previous) arrive through a long poll and go to whichever
     /// player was last reported.
     private func listenForCommands() {
         commands?.cancel()
@@ -162,6 +162,9 @@ final class Model: ObservableObject {
                     seq = reply["seq"] as? Int
                     if let name = reply["command"] as? String, let command = MediaCommand(rawValue: name), sharing {
                         await active?.send(command)
+                        // Tell the frame what came of it without waiting for the next round.
+                        last = nil
+                        tick()
                     }
                 } catch {
                     // Start over from the hub's current number so an old tap is not replayed.

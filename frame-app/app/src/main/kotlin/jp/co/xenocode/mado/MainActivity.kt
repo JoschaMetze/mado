@@ -145,7 +145,7 @@ class MainActivity : Activity(), HubLink.Listener {
             visibility = View.GONE
             fullCover = prefs().getBoolean("full_cover", false)
             onFullCover = { prefs().edit().putBoolean("full_cover", it).apply() }
-            onPlayPause = { link?.send(JSONObject().put("t", "event").put("kind", "media").put("action", "playpause")) }
+            onMedia = { link?.send(JSONObject().put("t", "event").put("kind", "media").put("action", it)) }
             onClose = {
                 showScene(HOME)
                 lingerOnNowPlaying()

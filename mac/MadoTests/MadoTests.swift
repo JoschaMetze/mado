@@ -18,6 +18,17 @@ final class MadoTests: XCTestCase {
         XCTAssertEqual(track?.artworkURL?.host, "example.com")
     }
 
+    func testCommandsNeverLaunchThePlayer() {
+        for command in [MediaCommand.playpause, .next, .previous] {
+            XCTAssertTrue(OSA.script(for: command, player: "Music").hasPrefix("if application \"Music\" is running then "))
+        }
+    }
+
+    func testPreviousRestartsATrackThatIsUnderWay() {
+        let script = OSA.script(for: .previous, player: "Spotify")
+        XCTAssertTrue(script.hasSuffix("tell application \"Spotify\" to if player position > 3 then set player position to 0 else previous track"))
+    }
+
     func testStoppedOrMissingIsNoTrack() {
         XCTAssertNil(PlayerReply.parse("stopped"))
         XCTAssertNil(PlayerReply.parse(nil))

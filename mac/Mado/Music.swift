@@ -59,13 +59,21 @@ enum OSA {
         }
     }
 
-    static func verb(for command: MediaCommand) -> String {
+    /// What to tell `player` to do for a tap on the frame. Never launches the player.
+    /// "Previous" does what the button in a player does: back to the start of the track,
+    /// or to the track before when this one has only just begun.
+    static func script(for command: MediaCommand, player: String) -> String {
+        let action: String
         switch command {
-        case .playpause: return "playpause"
-        case .next: return "next track"
-        case .previous: return "previous track"
+        case .playpause: action = "playpause"
+        case .next: action = "next track"
+        case .previous: action = "if player position > \(restartAfter) then set player position to 0 else previous track"
         }
+        return "if application \"\(player)\" is running then tell application \"\(player)\" to \(action)"
     }
+
+    /// Seconds into a track after which "previous" restarts it.
+    static let restartAfter = 3
 }
 
 enum PlayerReply {
@@ -131,7 +139,7 @@ final class AppleMusic: MusicSource {
     }
 
     func send(_ command: MediaCommand) async {
-        _ = await OSA.run("if application \"Music\" is running then tell application \"Music\" to \(OSA.verb(for: command))")
+        _ = await OSA.run(OSA.script(for: command, player: "Music"))
     }
 }
 
@@ -162,7 +170,7 @@ final class Spotify: MusicSource {
     }
 
     func send(_ command: MediaCommand) async {
-        _ = await OSA.run("if application \"Spotify\" is running then tell application \"Spotify\" to \(OSA.verb(for: command))")
+        _ = await OSA.run(OSA.script(for: command, player: "Spotify"))
     }
 }
 

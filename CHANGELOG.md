@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Now playing has buttons for previous, play or pause, and next under the progress bar, and
+  they work the player on the Mac. Previous starts the track again, or goes to the one
+  before when the track has only just begun. Mado for Mac reports back at once after a tap
+  instead of on its next round. Needs the new Mado for Mac for the restart; the hub is
+  unchanged.
 - Frames find the hub by themselves. The hub announces itself on the local network over mDNS
   and a frame with no hub connects to the one it finds, or asks which when there are several.
   Tapping the hub's corner of the rail lists the hubs on the network and takes a typed

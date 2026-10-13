@@ -6,6 +6,7 @@ import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -16,6 +17,7 @@ import android.text.TextPaint
 import android.text.TextUtils
 import android.view.MotionEvent
 import android.view.View
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -24,12 +26,14 @@ import kotlin.math.sin
 /**
  * The now-playing scene: the cover, big type, and a backdrop made from the cover itself.
  * Tap the cover to let it fill the height of the glass, tap again to bring the text back;
- * tap the text to play or pause. "Close" in the top right corner goes back home.
+ * tap the text to play or pause. Under the text are previous, play or pause, and next.
+ * "Close" in the top right corner goes back home.
  * The hub sends the backdrop tiny and already blurred, so all this does is stretch it and let
  * it drift; nothing here is expensive for the Mali-400.
  */
 class NowPlayingView(context: Context) : View(context) {
-    var onPlayPause: (() -> Unit)? = null
+    /** A tap asking the player for "playpause", "next" or "previous". */
+    var onMedia: ((String) -> Unit)? = null
     var onFullCover: ((Boolean) -> Unit)? = null
     var onClose: (() -> Unit)? = null
 
@@ -88,6 +92,14 @@ class NowPlayingView(context: Context) : View(context) {
     private val matrix = Matrix()
     private val coverRect = RectF()
     private val rect = RectF()
+    private val icon = Path()
+    /** Centre line of the buttons, as last drawn. */
+    private var controlsY = 0f
+    private var controlsLeft = 0f
+    private var pressed = -1
+    private var pressedAtMs = 0L
+    /** When a tap flipped `playing` ahead of the player's own report; 0 when it is as reported. */
+    private var guessedAtMs = 0L
 
     fun setTrack(title: String, artist: String, album: String, source: String) {
         this.artist = artist
@@ -106,11 +118,28 @@ class NowPlayingView(context: Context) : View(context) {
     }
 
     fun setPlayback(playing: Boolean, positionS: Double, durationS: Double) {
+        // A report that was already on its way when the glass was tapped still says the old
+        // thing; the tap is believed over it until a report agrees or the guess runs out.
+        if (guessedAtMs != 0L && playing != this.playing) return
+        guessedAtMs = 0L
         this.playing = playing
         this.positionS = positionS
         this.durationS = durationS
         positionAtMs = SystemClock.uptimeMillis()
         invalidate()
+    }
+
+    /**
+     * Ask the player to play or pause, and show it done without waiting to be told: the
+     * report takes a second or two to come round. If none comes, the guess is taken back.
+     */
+    private fun playPause() {
+        val now = SystemClock.uptimeMillis()
+        positionS = position()
+        positionAtMs = now
+        playing = !playing
+        guessedAtMs = if (guessedAtMs == 0L) now else 0L
+        onMedia?.invoke("playpause")
     }
 
     /** Swap in new artwork (or none) with a crossfade. */
@@ -132,6 +161,12 @@ class NowPlayingView(context: Context) : View(context) {
         if (fade >= 1f) {
             oldCover = null
             oldBackdrop = null
+        }
+        if (guessedAtMs != 0L && now - guessedAtMs > GUESS_MS) {
+            positionS = position()
+            positionAtMs = now
+            playing = !playing
+            guessedAtMs = 0L
         }
         rest += ((if (playing) 0f else 1f) - rest) * 0.1f
 
@@ -217,7 +252,7 @@ class NowPlayingView(context: Context) : View(context) {
     private fun drawText(canvas: Canvas, h: Float, alpha: Float, shift: Float) {
         val layout = titleLayout ?: return
         val left = TEXT_LEFT + shift
-        val blockH = 34f + layout.height + 52f + (if (album.isEmpty()) 0f else 34f) + 70f
+        val blockH = 34f + layout.height + 52f + (if (album.isEmpty()) 0f else 34f) + (if (durationS > 0) 70f else 0f) + CONTROLS_H
         var y = h / 2 - blockH / 2
         textZone.set(left - 20f, y - 20f, left + TEXT_W + 20f, y + blockH + 20f)
         textZones.add(textZone)
@@ -245,19 +280,62 @@ class NowPlayingView(context: Context) : View(context) {
             y += 34f
         }
 
-        if (durationS <= 0) return
-        val position = position()
-        y += 40f
-        fill.color = (0x40 * alpha).toInt() shl 24 or 0xFFFFFF
-        rect.set(left, y, left + TEXT_W, y + 4f)
-        canvas.drawRoundRect(rect, 2f, 2f, fill)
-        fill.color = (255 * alpha).toInt() shl 24 or 0xFFFFFF
-        rect.right = left + TEXT_W * (position / durationS).toFloat()
-        canvas.drawRoundRect(rect, 2f, 2f, fill)
-        monoPaint.alpha = (150 * alpha).toInt()
-        canvas.drawText(clock(position), left, y + 30f, monoPaint)
-        val total = clock(durationS)
-        canvas.drawText(total, left + TEXT_W - monoPaint.measureText(total), y + 30f, monoPaint)
+        if (durationS > 0) {
+            val position = position()
+            fill.color = (0x40 * alpha).toInt() shl 24 or 0xFFFFFF
+            rect.set(left, y + 40f, left + TEXT_W, y + 44f)
+            canvas.drawRoundRect(rect, 2f, 2f, fill)
+            fill.color = (255 * alpha).toInt() shl 24 or 0xFFFFFF
+            rect.right = left + TEXT_W * (position / durationS).toFloat()
+            canvas.drawRoundRect(rect, 2f, 2f, fill)
+            monoPaint.alpha = (150 * alpha).toInt()
+            canvas.drawText(clock(position), left, y + 70f, monoPaint)
+            val total = clock(durationS)
+            canvas.drawText(total, left + TEXT_W - monoPaint.measureText(total), y + 70f, monoPaint)
+            y += 70f
+        }
+        controlsLeft = left
+        controlsY = y + CONTROLS_H - 30f
+        drawControls(canvas, alpha)
+    }
+
+    /** Spread along the progress bar: its two ends and its middle. */
+    private fun controlX(i: Int) = controlsLeft + 16f + (TEXT_W - 32f) * i / 2
+
+    /** Previous, play or pause, next. Drawn at their real size: the frame smudges scaled paths. */
+    private fun drawControls(canvas: Canvas, alpha: Float) {
+        val cy = controlsY
+        val sinceMs = SystemClock.uptimeMillis() - pressedAtMs
+        if (pressed >= 0 && sinceMs < PRESS_MS) {
+            fill.color = (0x48 * alpha * (1f - sinceMs / PRESS_MS)).toInt() shl 24 or 0xFFFFFF
+            canvas.drawCircle(controlX(pressed), cy, 44f, fill)
+        }
+        fill.color = (230 * alpha).toInt() shl 24 or 0xFFFFFF
+        for (i in 0..2) {
+            val cx = controlX(i)
+            icon.rewind()
+            when {
+                i == 1 && playing -> {
+                    icon.addRect(cx - 12f, cy - 15f, cx - 3f, cy + 15f, Path.Direction.CW)
+                    icon.addRect(cx + 3f, cy - 15f, cx + 12f, cy + 15f, Path.Direction.CW)
+                }
+                i == 1 -> triangle(cx - 10f, cx + 16f, cy, 16f)
+                else -> {
+                    // The bar is on the side the arrow points to.
+                    val d = if (i == 0) -1f else 1f
+                    triangle(cx - 12f * d, cx + 9f * d, cy, 13f)
+                    icon.addRect(min(cx + 10f * d, cx + 14f * d), cy - 13f, max(cx + 10f * d, cx + 14f * d), cy + 13f, Path.Direction.CW)
+                }
+            }
+            canvas.drawPath(icon, fill)
+        }
+    }
+
+    private fun triangle(base: Float, tip: Float, cy: Float, half: Float) {
+        icon.moveTo(base, cy - half)
+        icon.lineTo(tip, cy)
+        icon.lineTo(base, cy + half)
+        icon.close()
     }
 
     private fun ellipsize(s: String) = TextUtils.ellipsize(s, linePaint, TEXT_W.toFloat(), TextUtils.TruncateAt.END).toString()
@@ -275,12 +353,28 @@ class NowPlayingView(context: Context) : View(context) {
                 fullCover = !fullCover
                 onFullCover?.invoke(fullCover)
             }
-            event.x >= TEXT_LEFT - 30f && event.y > height * 0.2f && event.y < height * 0.8f -> onPlayPause?.invoke()
+            abs(event.y - controlsY) <= CONTROL_REACH && control(event.x) >= 0 -> {
+                pressed = control(event.x)
+                pressedAtMs = SystemClock.uptimeMillis()
+                if (pressed == 1) playPause() else onMedia?.invoke(ACTIONS[pressed])
+            }
+            event.x >= TEXT_LEFT - 30f && event.y > height * 0.2f && event.y < height * 0.8f -> playPause()
         }
         return true
     }
 
+    /** Which button a tap at `x` is on, or -1. */
+    private fun control(x: Float) = (0..2).firstOrNull { abs(x - controlX(it)) <= CONTROL_REACH * 1.5f } ?: -1
+
     private companion object {
+        val ACTIONS = arrayOf("previous", "playpause", "next")
+        /** Room under the text for the buttons. */
+        const val CONTROLS_H = 96f
+        /** How far above or below a button a tap still lands on it; half as far again to the sides. */
+        const val CONTROL_REACH = 52f
+        const val PRESS_MS = 400f
+        /** How long a play or pause shown ahead of the player's report is believed. */
+        const val GUESS_MS = 6000L
         const val WHITE = 0xFFFFFFFF.toInt()
         const val COVER = 580f
         const val COVER_LEFT = 64f
