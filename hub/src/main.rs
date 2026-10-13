@@ -74,6 +74,31 @@ pub struct Notify {
     pub ttl_s: Option<u64>,
 }
 
+/// Something asked of Tama, the frame's companion.
+#[derive(Deserialize)]
+pub struct Companion {
+    pub action: String,
+    pub ttl_s: Option<u64>,
+    pub source: Option<String>,
+}
+
+/// What Tama can be asked for: hobbies, gestures, moods that last a while, and "calm" to drop a mood.
+pub const COMPANION_ACTIONS: [&str; 13] = [
+    "wave",
+    "nod",
+    "celebrate",
+    "happy",
+    "worried",
+    "calm",
+    "hide",
+    "fog",
+    "pebbles",
+    "mote",
+    "nap",
+    "peek",
+    "perch",
+];
+
 pub struct FrameConn {
     tx: mpsc::UnboundedSender<String>,
     pub hello: Value,
@@ -95,6 +120,8 @@ pub struct Hub {
     pub art: Mutex<Option<Arc<art::Daily>>>,
     pub art_busy: AtomicBool,
     pub projects: Mutex<Vec<projects::Project>>,
+    /// What Tama was last seen doing, as the frame reported it.
+    pub tama: Mutex<Option<String>>,
     pub data_dir: PathBuf,
     looks: Mutex<HashMap<u64, oneshot::Sender<String>>>,
     next_id: AtomicU64,
@@ -121,6 +148,7 @@ impl Hub {
             art: Mutex::default(),
             art_busy: AtomicBool::new(false),
             projects: Mutex::new(projects),
+            tama: Mutex::default(),
             data_dir,
             looks: Mutex::default(),
             next_id: AtomicU64::new(1),
@@ -192,6 +220,21 @@ impl Hub {
         Ok(json!({ "id": id, "level": level, "shown_on_frames": frames }))
     }
 
+    /// Tama acts on it in its own way, and not at all if the owner has hidden it.
+    pub fn companion(&self, c: Companion) -> Result<Value, String> {
+        let action = c.action.trim();
+        if !COMPANION_ACTIONS.contains(&action) {
+            return Err(format!("action must be one of {}", COMPANION_ACTIONS.join(", ")));
+        }
+        let source = c.source.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let frames = self.send_all(&json!({ "t": "companion", "action": action, "ttl_s": c.ttl_s.unwrap_or(0) }));
+        self.log(format!("{} asked Tama to {action}", source.unwrap_or("someone")));
+        if frames == 0 {
+            return Err("no frame is connected, so Tama did not hear".into());
+        }
+        Ok(json!({ "action": action, "sent_to_frames": frames, "tama_was": *self.tama.lock().unwrap() }))
+    }
+
     /// Ask the first connected frame for a JPEG of what is on its screen.
     pub async fn look(&self) -> Result<Vec<u8>, String> {
         let req = self.id();
@@ -231,8 +274,9 @@ impl Hub {
         let now_playing = self.now_playing.lock().unwrap().message();
         let art = self.art.lock().unwrap().as_ref().map(|a| a.message());
         let projects = self.projects_message()["items"].take();
+        let tama = self.tama.lock().unwrap().clone();
         json!({
-            "frames": frames, "now_playing": now_playing, "art": art, "projects": projects,
+            "frames": frames, "tama": tama, "now_playing": now_playing, "art": art, "projects": projects,
             "config": *self.config.read().unwrap(), "recent": recent,
         })
     }
@@ -257,6 +301,9 @@ impl Hub {
                     self.commands.send_modify(|c| *c = (c.0 + 1, action.to_owned()));
                 }
             }
+            Some("event") if msg["kind"] == "tama" => {
+                *self.tama.lock().unwrap() = msg["doing"].as_str().map(str::to_owned);
+            }
             Some("event") => self.log(format!(
                 "frame #{id}: {} {}",
                 msg["kind"].as_str().unwrap_or("event"),
@@ -276,6 +323,8 @@ async fn frame_session(socket: WebSocket, hub: Shared) {
     let id = hub.id();
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    // Says what this hub understands, so a newer frame does not send an older hub things it would only log.
+    let _ = tx.send(json!({ "t": "hub", "version": env!("CARGO_PKG_VERSION"), "tama": true }).to_string());
     let _ = tx.send(json!({ "t": "config", "config": *hub.config.read().unwrap() }).to_string());
     let _ = tx.send(hub.now_playing.lock().unwrap().message().to_string());
     let _ = tx.send(hub.projects_message().to_string());
@@ -314,12 +363,24 @@ async fn frame_session(socket: WebSocket, hub: Shared) {
         }
     }
     writer.abort();
-    hub.frames.lock().unwrap().remove(&id);
+    let mut frames = hub.frames.lock().unwrap();
+    frames.remove(&id);
+    if frames.is_empty() {
+        *hub.tama.lock().unwrap() = None;
+    }
+    drop(frames);
     hub.log(format!("frame #{id} disconnected"));
 }
 
 async fn api_notify(State(hub): State<Shared>, Json(n): Json<Notify>) -> Response {
     match hub.notify(n) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+async fn api_companion(State(hub): State<Shared>, Json(c): Json<Companion>) -> Response {
+    match hub.companion(c) {
         Ok(v) => Json(v).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
     }
@@ -369,6 +430,7 @@ async fn main() {
         .route("/ui/art/prefs", post(ui::art_prefs))
         .route("/ui/theme", post(ui::theme))
         .route("/api/notify", post(api_notify))
+        .route("/api/companion", post(api_companion))
         .route("/api/state", get(api_state))
         .route("/api/look", get(api_look))
         .route(
@@ -446,6 +508,19 @@ mod tests {
         assert!(hub.notify(alert("  ", None)).unwrap_err().contains("empty"));
         assert!(hub.notify(alert(&"x".repeat(281), None)).unwrap_err().contains("280"));
         assert!(hub.notify(alert("hi", Some("shout"))).unwrap_err().contains("level"));
+    }
+
+    #[test]
+    fn tama_is_only_asked_for_things_it_knows() {
+        let hub = hub();
+        let ask = |action: &str| Companion {
+            action: action.into(),
+            ttl_s: None,
+            source: None,
+        };
+        assert!(hub.companion(ask("dance")).unwrap_err().contains("action must be"));
+        assert!(hub.companion(ask("wave")).unwrap_err().contains("no frame"));
+        assert_eq!(hub.state()["tama"], Value::Null);
     }
 
     #[test]

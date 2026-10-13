@@ -156,6 +156,7 @@ class NowPlayingView(context: Context) : View(context) {
         fill.color = (0x80 * rest).toInt() shl 24
         canvas.drawRoundRect(coverRect, radius, radius, fill)
 
+        textZones.clear()
         val textAlpha = 1f - min(1f, full * 2.5f)
         if (textAlpha > 0f) drawText(canvas, h, textAlpha, full * 80f)
         if (full > 0.02f && durationS > 0) {
@@ -165,6 +166,10 @@ class NowPlayingView(context: Context) : View(context) {
         }
         postInvalidateOnAnimation()
     }
+
+    /** Where the words are, so Tama can keep off them. Empty while the cover fills the screen. */
+    val textZones = ArrayList<RectF>()
+    private val textZone = RectF()
 
     private fun drawBackdrop(canvas: Canvas, bitmap: Bitmap, w: Float, h: Float, t: Float, alpha: Int) {
         // Oversized so a slow drift never shows an edge.
@@ -200,6 +205,8 @@ class NowPlayingView(context: Context) : View(context) {
         val left = TEXT_LEFT + shift
         val blockH = 34f + layout.height + 52f + (if (album.isEmpty()) 0f else 34f) + 70f
         var y = h / 2 - blockH / 2
+        textZone.set(left - 20f, y - 20f, left + TEXT_W + 20f, y + blockH + 20f)
+        textZones.add(textZone)
 
         monoPaint.alpha = (190 * alpha).toInt()
         val where = if (source.isEmpty()) "" else " ON ${source.uppercase()}"

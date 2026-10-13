@@ -38,7 +38,12 @@ it stays smooth on very modest hardware.
 
 ![An urgent alert](docs/images/urgent.jpg)
 
-Planned: Tama (a small on-screen companion), canvases that agents can draw on, night mode.
+Tama, a small creature, lives on the glass above every scene. It wanders, amuses itself
+(draws in fogged glass, stacks pebbles, chases dust, naps), dresses for the weather, bops to
+music, frets beside urgent alerts, and can be poked, carried and tilted. The rail has switches
+to hide it and to mute it.
+
+Planned: canvases that agents can draw on, night mode.
 
 ## How it fits together
 
@@ -119,6 +124,7 @@ curl -X POST http://HOST:7878/api/notify \
 | HTTP | |
 |---|---|
 | `POST /api/notify` | `text`, optional `level` (`whisper`, `nudge`, `urgent`), `source`, `ttl_s` (urgent ignores it and stays until tapped) |
+| `POST /api/companion` | `action` (as for `frame_companion` below), optional `ttl_s` for a mood or hiding, `source` |
 | `POST /api/project` | `name`, `status` (`on_track`, `needs_you`, `blocked`, `done`, `archived`), optional `note`, `progress` 0 to 1 |
 | `GET /api/look` | JPEG of what the frame is showing |
 | `GET /api/state` | Connected frames, now playing, today's painting, projects, config, recent activity |
@@ -127,6 +133,7 @@ curl -X POST http://HOST:7878/api/notify \
 | MCP tool | |
 |---|---|
 | `frame_notify` | Show an alert |
+| `frame_companion` | Ask Tama for a gesture (`wave`, `nod`, `celebrate`), a mood (`happy`, `worried`, `calm`), to `hide`, or a hobby |
 | `frame_project` | Report where a project stands |
 | `frame_look` | Get a picture of the frame's screen, so an agent can see its own work |
 | `frame_state` | The same as `GET /api/state` |

@@ -9,7 +9,7 @@ use axum::{
 use base64::Engine;
 use serde_json::{json, Value};
 
-use crate::{projects, Notify, Shared};
+use crate::{projects, Companion, Notify, Shared, COMPANION_ACTIONS};
 
 const PROTOCOL: &str = "2025-06-18";
 
@@ -95,13 +95,30 @@ fn tools() -> Value {
             }
         },
         {
+            "name": "frame_companion",
+            "description": "Ask something of Tama, the small creature that lives on the frame. A gentler channel than an alert: \
+                nothing is written on the glass. Gestures: wave, nod, celebrate (for good news). \
+                Moods that last a while: happy, worried (something is not right, but it can wait); calm ends a mood. \
+                hide sends it out of sight for a while. Hobbies it will take up now: fog (draws in fogged glass), \
+                pebbles, mote, nap, peek, perch. Tama acts in its own way, and not at all if the owner has hidden it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": COMPANION_ACTIONS },
+                    "ttl_s": { "type": "integer", "minimum": 0, "description": "Seconds a mood (default 600) or hide (default 300) lasts. Ignored for the rest." },
+                    "source": { "type": "string", "description": "Who is asking, for the hub's log, e.g. your agent name." }
+                },
+                "required": ["action"]
+            }
+        },
+        {
             "name": "frame_look",
             "description": "Return a picture of what the frame is showing right now (1280x800 JPEG).",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "frame_state",
-            "description": "Return which frames are connected, the hub's config and recent activity.",
+            "description": "Return which frames are connected, what Tama is doing, the hub's config and recent activity.",
             "inputSchema": { "type": "object", "properties": {} }
         }
     ])
@@ -117,6 +134,10 @@ async fn call(hub: &Shared, params: &Value) -> Value {
         "frame_project" => serde_json::from_value::<projects::Update>(args)
             .map_err(|e| e.to_string())
             .and_then(|u| hub.update_project(u))
+            .map(text),
+        "frame_companion" => serde_json::from_value::<Companion>(args)
+            .map_err(|e| e.to_string())
+            .and_then(|c| hub.companion(c))
             .map(text),
         "frame_look" => hub.look().await.map(|jpeg| {
             json!({ "type": "image", "mimeType": "image/jpeg",

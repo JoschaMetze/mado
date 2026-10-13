@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.util.Base64
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -23,6 +24,10 @@ class MainActivity : Activity(), HubLink.Listener {
     private lateinit var root: FrameLayout
     private lateinit var alerts: AlertView
     private lateinit var rail: RailView
+    private lateinit var tama: TamaView
+    private val tamaZones = ArrayList<android.graphics.RectF>()
+    private var trackTitle = ""
+    private var hubHearsTama = false
     private lateinit var nowPlaying: NowPlayingView
     private lateinit var dashboard: DashboardView
     private lateinit var projectsPage: ProjectsView
@@ -53,7 +58,9 @@ class MainActivity : Activity(), HubLink.Listener {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         alerts = AlertView(this).apply {
+            onPresented = { tama.alert(it.level) }
             onDismissed = { alert, reason ->
+                tama.alertGone()
                 link?.send(JSONObject().put("t", "event").put("kind", "dismissed").put("id", alert.id).put("reason", reason))
             }
         }
@@ -70,7 +77,31 @@ class MainActivity : Activity(), HubLink.Listener {
         }
         projectsPage = ProjectsView(this)
         scenes = listOf(dashboard, nowPlaying)
+        tama = TamaView(this).apply {
+            visibility = if (prefs().getBoolean("tama", true)) View.VISIBLE else View.GONE
+            sound = prefs().getBoolean("tama_sound", false)
+            onDoing = ::reportTama
+            keepOut = {
+                tamaZones.clear()
+                tamaZones.addAll(if (scene == DASHBOARD) dashboard.textZones else nowPlaying.textZones)
+                if (!alerts.zone.isEmpty) tamaZones.add(alerts.zone)
+                tamaZones
+            }
+            alertEdge = alerts::leftEdge
+        }
         rail = RailView(this).apply {
+            tamaShown = tama.visibility == View.VISIBLE
+            tamaSound = tama.sound
+            onTama = {
+                tama.visibility = if (it) View.VISIBLE else View.GONE
+                // A hidden Tama draws nothing, so it cannot say so itself.
+                if (!it) reportTama("hidden by the owner")
+                prefs().edit().putBoolean("tama", it).apply()
+            }
+            onTamaSound = {
+                tama.sound = it
+                prefs().edit().putBoolean("tama_sound", it).apply()
+            }
             scenes = listOf("Dashboard", "Now playing")
             onScene = { index ->
                 showScene(index)
@@ -85,6 +116,7 @@ class MainActivity : Activity(), HubLink.Listener {
         root = FrameLayout(this).apply {
             scenes.forEach(::addView)
             addView(projectsPage)
+            addView(tama)
             addView(alerts)
             addView(rail)
         }
@@ -97,14 +129,36 @@ class MainActivity : Activity(), HubLink.Listener {
     }
 
     // `am start ... --es hub ws://host:7878/frame` points the frame at a hub; it is remembered.
+    // `--es tama pebbles` (or fog, mote, nap, peek, perch) asks Tama for a hobby now.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (adoptHubAddress(intent)) connect()
+        val wanted = intent.getStringExtra("tama")
+        Hobby.values().firstOrNull { it.name.equals(wanted, ignoreCase = true) }?.let(tama::perform)
+        // Debug builds only, for looking at how Tama dresses: `--es tama_sky rain --ei tama_temp 3 --ez tama_music true`,
+        // and at its faces: `--es tama_face sparkle,grin,raised` (eyes, mouth, brows; add `,tear`).
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            val sky = Sky.values().firstOrNull { it.name.equals(intent.getStringExtra("tama_sky"), ignoreCase = true) }
+            if (sky != null) tama.setWeather(Weather("", intent.getIntExtra("tama_temp", 20), 0, 0, "", "", "", true, sky))
+            intent.getStringExtra("tama_face")?.split(',')?.let {
+                tama.pinFace(it.getOrElse(0) { "" }, it.getOrElse(1) { "" }, it.getOrElse(2) { "" }, it.getOrNull(3) == "tear")
+            }
+            if (intent.hasExtra("tama_music")) tama.music = intent.getBooleanExtra("tama_music", false)
+        }
+    }
+
+    override fun onPause() {
+        tama.remember()
+        super.onPause()
     }
 
     override fun onDestroy() {
         link?.stop()
         super.onDestroy()
+    }
+
+    private fun reportTama(doing: String) {
+        if (hubHearsTama) link?.send(JSONObject().put("t", "event").put("kind", "tama").put("doing", doing))
     }
 
     private fun prefs() = getSharedPreferences("mado", MODE_PRIVATE)
@@ -152,6 +206,10 @@ class MainActivity : Activity(), HubLink.Listener {
 
     override fun onHubLink(up: Boolean) {
         alerts.linkUp = up
+        // With the hub gone nobody can say whether music is still playing.
+        if (!up) tama.music = false
+        if (prefs().getString("hub", null) != null) tama.hubLink(up)
+        if (!up) hubHearsTama = false
         rail.linkUp = up
         if (up) {
             paintingDay = ""
@@ -168,9 +226,17 @@ class MainActivity : Activity(), HubLink.Listener {
             null
         }
         val here = places?.optJSONObject(0)
-        if (here == null) dashboard.setWeather(null)
+        if (here == null) {
+            dashboard.setWeather(null)
+            tama.setWeather(null)
+        }
         // A failed refresh keeps the last forecast on screen rather than blanking it.
-        here?.let { p -> weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) { if (it != null) dashboard.setWeather(it) } }
+        here?.let { p -> weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) {
+            if (it != null) {
+                dashboard.setWeather(it)
+                tama.setWeather(it)
+            }
+        } }
 
         val others = (1 until (places?.length() ?: 0)).mapNotNull { places?.optJSONObject(it) }
         if (others.size != away.size) away = arrayOfNulls(others.size)
@@ -224,6 +290,7 @@ class MainActivity : Activity(), HubLink.Listener {
                             swatches = IntArray(5) { i -> parse(swatches?.optString(i), Color.GRAY) },
                         )
                     dashboard.setArt(art)
+                    tama.notice()
                     projectsPage.setArt(art)
                 }
             }
@@ -247,16 +314,26 @@ class MainActivity : Activity(), HubLink.Listener {
 
     override fun onHubMessage(msg: JSONObject) {
         when (msg.optString("t")) {
-            "notify" -> alerts.show(
-                AlertView.Alert(
-                    id = msg.optLong("id"),
-                    level = msg.optString("level", "nudge"),
-                    text = msg.optString("text"),
-                    source = if (msg.isNull("source")) null else msg.optString("source"),
-                    ttlMs = msg.optLong("ttl_s") * 1000,
+            "notify" -> {
+                tama.notice()
+                alerts.show(
+                    AlertView.Alert(
+                        id = msg.optLong("id"),
+                        level = msg.optString("level", "nudge"),
+                        text = msg.optString("text"),
+                        source = if (msg.isNull("source")) null else msg.optString("source"),
+                        ttlMs = msg.optLong("ttl_s") * 1000,
+                    )
                 )
-            )
+            }
             "now_playing" -> nowPlaying(msg)
+            // Only a hub that says it follows Tama is told what Tama is up to; an older one
+            // would write every change into its log.
+            "hub" -> {
+                hubHearsTama = msg.optBoolean("tama")
+                reportTama(tama.doingNow())
+            }
+            "companion" -> tama.act(msg.optString("action"), msg.optLong("ttl_s") * 1000)
             "art" -> painting(msg)
             "projects" -> projects(msg)
             "look" -> look(msg.optLong("req"))
@@ -275,6 +352,7 @@ class MainActivity : Activity(), HubLink.Listener {
         val arriving = scenes[index]
         scene = index
         rail.activeScene = index
+        tama.notice()
         arriving.animate().cancel()
         arriving.alpha = 0f
         arriving.visibility = View.VISIBLE
@@ -287,6 +365,11 @@ class MainActivity : Activity(), HubLink.Listener {
     private fun nowPlaying(msg: JSONObject) {
         val state = msg.optString("state")
         val playing = state == "playing"
+        tama.music = playing
+        if (playing && msg.optString("title") != trackTitle) {
+            trackTitle = msg.optString("title")
+            tama.trackChanged(msg.optString("artist"))
+        }
         nowPlaying.setTrack(msg.optString("title"), msg.optString("artist"), msg.optString("album"), msg.optString("source"))
         nowPlaying.setPlayback(playing, msg.optDouble("position_s", 0.0), msg.optDouble("duration_s", 0.0))
 
@@ -342,6 +425,11 @@ class MainActivity : Activity(), HubLink.Listener {
                     .put("jpeg", Base64.encodeToString(jpeg.toByteArray(), Base64.NO_WRAP))
             )
         }
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        tama.watch(event)
+        return super.dispatchTouchEvent(event)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

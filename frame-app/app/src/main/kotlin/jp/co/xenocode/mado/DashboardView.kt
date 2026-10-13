@@ -90,6 +90,8 @@ class DashboardView(context: Context) : View(context) {
     /** Where the projects are in the current layout, for taps; the pigments layout has two groups. */
     private val studio = RectF()
     private val studio2 = RectF()
+    /** Where the words are in the current layout, so Tama can keep off them. Rebuilt on every draw. */
+    val textZones = ArrayList<RectF>()
     private val path = Path()
     private val moon = Path()
     private val bite = Path()
@@ -198,6 +200,7 @@ class DashboardView(context: Context) : View(context) {
         val h = height.toFloat()
         studio.setEmpty()
         studio2.setEmpty()
+        textZones.clear()
         when (layout) {
             MATTED -> drawMatted(canvas, w, h)
             SPLIT -> drawSplit(canvas, w, h)
@@ -205,6 +208,8 @@ class DashboardView(context: Context) : View(context) {
             else -> drawFullBleed(canvas, w, h)
         }
         drawLearn(canvas, w, h)
+        for (r in arrayOf(plaque, studio, studio2)) if (!r.isEmpty) textZones.add(RectF(r))
+        if (learn > 0.5f) quiet(w - LEARN_W, 0f, w, h)
 
         val target = if (learnOpen) 1f else 0f
         if (abs(target - learn) > 0.002f) {
@@ -214,6 +219,10 @@ class DashboardView(context: Context) : View(context) {
             learn = target
             postInvalidateDelayed(60_000 - now.time % 60_000 + 50)
         }
+    }
+
+    private fun quiet(left: Float, top: Float, right: Float, bottom: Float) {
+        textZones.add(RectF(left, top, right, bottom))
     }
 
     // --- A: the painting is the whole screen ---------------------------------------------
@@ -242,17 +251,22 @@ class DashboardView(context: Context) : View(context) {
         val x = 40f + text.measureText(time) + 26f
         canvas.drawText(weekday.format(now).uppercase(), x, h - 82f, mono(WHITE, shadow = true, size = 16f))
         canvas.drawText(dayMonth.format(now).uppercase(), x, h - 56f, mono(WHITE, shadow = true, size = 16f))
+        quiet(30f, h - 188f, x + 190f, h - 24f)
 
         val awayA = away.take(3)
         weather?.let {
             val lift = if (awayA.isEmpty()) 0f else 12f + (awayA.size - 1) * AWAY_STEP
             canvas.drawText("${it.tempC}°", w - 46f, h - 98f - lift, type(78f, thin, WHITE, align = Paint.Align.RIGHT, shadow = true))
             canvas.drawText(it.sentence, w - 52f, h - 54f - lift, type(28f, italic, WHITE, align = Paint.Align.RIGHT, shadow = true))
+            // Two zones, so the empty corner beside the temperature stays free.
+            quiet(w - 200f, h - 162f - lift, w - 30f, h - 90f - lift)
+            quiet(w - 72f - max(text.measureText(it.sentence), 280f), h - 90f - lift, w - 30f, h - 8f)
         }
         if (awayA.isNotEmpty()) hairline(canvas, w - 52f - 260f, w - 52f, h - 50f - (awayA.size - 1) * AWAY_STEP, WHITE, 0.45f)
         awayA.forEachIndexed { i, place ->
             drawAway(canvas, place, w - 52f, h - 24f - (awayA.size - 1 - i) * AWAY_STEP, 17f, WHITE, 0.88f, Paint.Align.RIGHT, true, 620f)
         }
+        if (awayA.isNotEmpty()) quiet(w - 560f, h - 62f - (awayA.size - 1) * AWAY_STEP, w - 30f, h - 8f)
     }
 
     // --- B: a matted print on a wall the painting's colour --------------------------------
@@ -306,6 +320,7 @@ class DashboardView(context: Context) : View(context) {
             }
         }
 
+        quiet(x - 16f, 50f, w, sectionEnd + 12f)
         val top = 736f - projects.size * 62f
         // With four projects and other places above, there is no room left for the heading.
         if (projects.isNotEmpty() && top - 30f - sectionEnd >= 34f) canvas.drawText("IN THE STUDIO", x, top - 30f, mono(art.paper, 0.55f, 14f))
@@ -349,6 +364,8 @@ class DashboardView(context: Context) : View(context) {
             }
         }
 
+        // Clock, weather and projects nearly fill the panel, so all of it is off limits.
+        quiet(split, 0f, w, h)
         var y = h - 40f - projects.size * 58f
         projects.forEachIndexed { i, p ->
             drawMark(canvas, p.status, x + 7f, y + 12f)
@@ -441,6 +458,7 @@ class DashboardView(context: Context) : View(context) {
         away.take(3).forEachIndexed { i, place ->
             drawAway(canvas, place, w / 2, 440f + i * 30f, 19f, WHITE, 0.9f, Paint.Align.CENTER, true, 900f)
         }
+        quiet(w / 2 - 390f, 80f, w / 2 + 390f, 420f + min(3, away.size) * 30f)
     }
 
     // --- shared pieces --------------------------------------------------------------------

@@ -20,12 +20,16 @@ import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import kotlin.math.roundToInt
 
+/** What the sky is doing, in rising order of how wet you get. */
+enum class Sky { CLEAR, CLOUD, FOG, RAIN, SNOW, STORM }
+
 /** Today's weather for one place, already put into words. */
 class Weather(
     val place: String, val tempC: Int, val highC: Int, val lowC: Int, val sentence: String, val sunset: String,
     /** IANA timezone of the place, for showing its local time. */
     val timezone: String,
     val isDay: Boolean,
+    val sky: Sky = Sky.CLOUD,
 ) {
     val detail get() = "$tempC° now · $highC° high" + if (sunset.isEmpty()) "" else " · sunset $sunset"
 }
@@ -104,33 +108,32 @@ class WeatherSource(context: Context) {
             sunset = daily.getJSONArray("sunset").optString(0).substringAfter('T', ""),
             timezone = json.optString("timezone"),
             isDay = current.optInt("is_day", 1) == 1,
+            sky = Forecast.sky(current.getInt("weather_code")),
         )
     }
 }
 
 /** Turns hourly weather codes into the one line worth saying about the rest of today. */
 object Forecast {
-    private enum class Kind { CLEAR, CLOUD, FOG, RAIN, SNOW, STORM }
-
     private val words = arrayOf("twelve", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven")
 
     // WMO weather interpretation codes, as Open-Meteo reports them.
-    private fun kind(code: Int) = when (code) {
-        0, 1 -> Kind.CLEAR
-        45, 48 -> Kind.FOG
-        in 51..67, in 80..82 -> Kind.RAIN
-        in 71..77, 85, 86 -> Kind.SNOW
-        in 95..99 -> Kind.STORM
-        else -> Kind.CLOUD
+    fun sky(code: Int) = when (code) {
+        0, 1 -> Sky.CLEAR
+        45, 48 -> Sky.FOG
+        in 51..67, in 80..82 -> Sky.RAIN
+        in 71..77, 85, 86 -> Sky.SNOW
+        in 95..99 -> Sky.STORM
+        else -> Sky.CLOUD
     }
 
-    private fun wet(code: Int) = kind(code) >= Kind.RAIN
+    private fun wet(code: Int) = sky(code) >= Sky.RAIN
 
     private fun noun(code: Int) = when {
         code in 51..57 -> "Drizzle"
         code in 80..82 -> "Showers"
-        kind(code) == Kind.SNOW -> "Snow"
-        kind(code) == Kind.STORM -> "Thunderstorms"
+        sky(code) == Sky.SNOW -> "Snow"
+        sky(code) == Sky.STORM -> "Thunderstorms"
         else -> "Rain"
     }
 
@@ -166,9 +169,9 @@ object Forecast {
                 else -> "${noun(codes[rain])} tomorrow"
             }
         }
-        return when (kind(code)) {
-            Kind.CLEAR -> if (!isDay) "Clear tonight" else if (hour < 15) "Clear all day" else "A clear evening ahead"
-            Kind.FOG -> "Foggy, staying dry"
+        return when (sky(code)) {
+            Sky.CLEAR -> if (!isDay) "Clear tonight" else if (hour < 15) "Clear all day" else "A clear evening ahead"
+            Sky.FOG -> "Foggy, staying dry"
             else -> if (code == 2) "Some cloud, staying dry" else "Overcast, staying dry"
         }
     }

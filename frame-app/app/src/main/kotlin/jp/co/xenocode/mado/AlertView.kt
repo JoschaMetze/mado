@@ -37,6 +37,12 @@ class AlertView(context: Context) : View(context) {
     /** Called when an alert leaves the glass; reason is "tap" or "expired". */
     var onDismissed: ((Alert, String) -> Unit)? = null
 
+    /** Called each time an alert takes the glass, including a whisper opening into a nudge. */
+    var onPresented: ((Alert) -> Unit)? = null
+
+    /** The part of the glass the current alert covers once it is fully out; empty with none. */
+    val zone = RectF()
+
     var linkUp = false
         set(value) {
             field = value
@@ -90,6 +96,26 @@ class AlertView(context: Context) : View(context) {
         removeCallbacks(expire)
         if (alert.ttlMs > 0) postDelayed(expire, alert.ttlMs)
         animate(1f, 650, OvershootInterpolator(1.3f), null)
+
+        val w = width.toFloat()
+        val h = height.toFloat()
+        when (alert.level) {
+            WHISPER -> zone.set(w - BEAD_R * 1.4f, h / 2 - BEAD_R - 10f, w, h / 2 + BEAD_R + 10f)
+            URGENT -> zone.set(w + h * 0.95f * (0.35f - 1f) - 40f, 0f, w, h)
+            else -> {
+                val ph = max(104f, (body?.height ?: 0) + (if (alert.source != null) 30f else 0f) + 58f)
+                zone.set(w - NUDGE_TEXT_W - 76f - 20f, h * 0.3f - 20f, w, h * 0.3f + ph + 20f)
+            }
+        }
+        onPresented?.invoke(alert)
+    }
+
+    /** Roughly where the alert's left edge is at this height, for anything that wants to stand beside it. */
+    fun leftEdge(y: Float): Float {
+        if (current?.level != URGENT) return if (zone.isEmpty) width.toFloat() else zone.left
+        val r = height * 0.95f
+        val dy = y - height / 2f
+        return width + r * 0.35f - sqrt(max(0f, r * r - dy * dy)) - 90f
     }
 
     private fun dismiss(reason: String) {
@@ -98,6 +124,7 @@ class AlertView(context: Context) : View(context) {
         animate(0f, 320, AccelerateInterpolator()) {
             if (current === leaving) {
                 current = null
+                zone.setEmpty()
                 onDismissed?.invoke(leaving, reason)
                 queue.pollFirst()?.let(::present)
             }
@@ -301,7 +328,7 @@ class AlertView(context: Context) : View(context) {
         return true
     }
 
-    private companion object {
+    companion object {
         const val WHISPER = "whisper"
         const val NUDGE = "nudge"
         const val URGENT = "urgent"

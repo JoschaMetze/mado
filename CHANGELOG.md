@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Tama, the frame's companion: a small creature on the far side of the glass. It wanders
+  (keeping off the words), has hobbies it picks by mood, reacts to touch, tilt and knocks,
+  dresses for the weather, wears headphones while music plays, minds alerts, listens for a
+  lost hub on a tin-can telephone, and remembers its favourite spot and artists. The rail can
+  hide it and mute it; it is silent unless its sounds are switched on.
+- `frame_companion` and `POST /api/companion` ask Tama for a gesture, a mood or a hobby, and
+  `frame_state` says what it is doing.
 - A boot splash: Mado's mark in place of the vendor's power-on logo and boot animation.
   `assets/splash.py` builds both from `assets/splash.png`; `docs/boot-splash.md` says how to
   install them and how to go back.

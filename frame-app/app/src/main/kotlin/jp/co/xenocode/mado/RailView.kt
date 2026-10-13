@@ -24,6 +24,10 @@ class RailView(context: Context) : View(context) {
     var onBrightness: ((Float) -> Unit)? = null
     var onHome: (() -> Unit)? = null
     var onScene: ((Int) -> Unit)? = null
+    var onTama: ((Boolean) -> Unit)? = null
+    var onTamaSound: ((Boolean) -> Unit)? = null
+    var tamaShown = true
+    var tamaSound = false
 
     var scenes: List<String> = emptyList()
     var activeScene = 0
@@ -137,6 +141,10 @@ class RailView(context: Context) : View(context) {
         canvas.drawRoundRect(rect, 4f, 4f, stroke)
         canvas.drawText("Home screen", PAD + 32f, homeY + ROW_H / 2 + 8f, label)
 
+        drawSwitch(canvas, "Tama", homeY + ROW_STEP, tamaShown, 255)
+        // Sound has nothing to make it while Tama is hidden.
+        drawSwitch(canvas, "Tama sounds", homeY + 2 * ROW_STEP, tamaSound && tamaShown, if (tamaShown) 255 else 90)
+
         fill.color = if (linkUp) 0xFF4FD19C.toInt() else 0xFFFF7B7B.toInt()
         canvas.drawCircle(PAD + 5f, h - 58f, 5f, fill)
         canvas.drawText(if (linkUp) "HUB CONNECTED" else "NO HUB", PAD + 20f, h - 53f, small)
@@ -144,6 +152,20 @@ class RailView(context: Context) : View(context) {
         small.alpha = 110
         canvas.drawText(TextUtils.ellipsize(address, small, W - 2 * PAD, TextUtils.TruncateAt.END).toString(), PAD, h - 30f, small)
         canvas.restore()
+    }
+
+    private fun drawSwitch(canvas: Canvas, name: String, top: Float, on: Boolean, alpha: Int) {
+        val mid = top + ROW_H / 2
+        fill.color = if (on) FG else 0x38FFFFFF
+        fill.alpha = fill.alpha * alpha / 255
+        rect.set(PAD - 2f, mid - 7f, PAD + 22f, mid + 7f)
+        canvas.drawRoundRect(rect, 7f, 7f, fill)
+        fill.color = if (on) PANEL else FG
+        fill.alpha = alpha
+        canvas.drawCircle(if (on) PAD + 15f else PAD + 5f, mid, 5f, fill)
+        label.alpha = alpha
+        canvas.drawText(name, PAD + 32f, mid + 8f, label)
+        label.alpha = 255
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -203,6 +225,18 @@ class RailView(context: Context) : View(context) {
             downY in homeY..homeY + ROW_H -> {
                 settle(false)
                 onHome?.invoke()
+            }
+            downY in homeY + ROW_STEP..homeY + ROW_STEP + ROW_H -> {
+                tamaShown = !tamaShown
+                onTama?.invoke(tamaShown)
+                settle(true)
+                invalidate()
+            }
+            tamaShown && downY in homeY + 2 * ROW_STEP..homeY + 2 * ROW_STEP + ROW_H -> {
+                tamaSound = !tamaSound
+                onTamaSound?.invoke(tamaSound)
+                settle(true)
+                invalidate()
             }
             downY >= SCENE_Y && scene < scenes.size -> {
                 settle(false)
