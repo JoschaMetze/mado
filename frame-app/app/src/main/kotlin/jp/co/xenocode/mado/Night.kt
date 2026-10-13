@@ -32,6 +32,9 @@ class NightClock {
         forced = if (asleep == within(minute)) null else asleep
     }
 
+    /** Asleep only because someone said so, outside the night's own hours. */
+    fun napping(minute: Int) = forced == true && !within(minute)
+
     fun asleep(minute: Int): Boolean {
         val within = within(minute)
         if (wasWithin != null && wasWithin != within) forced = null
@@ -66,7 +69,7 @@ object Evening {
 
 /**
  * What the frame shows while it sleeps: the time in deep amber on black, and nothing else that
- * would light a dark room. Any touch wakes the frame for a while.
+ * would light a dark room. Any touch wakes the frame: for a while at night, for good by day.
  */
 class NightView(context: Context) : View(context) {
     var onWake: (() -> Unit)? = null

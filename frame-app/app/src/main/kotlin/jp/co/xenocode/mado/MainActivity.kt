@@ -275,9 +275,17 @@ class MainActivity : Activity(), HubLink.Listener {
         updateNight()
     }
 
-    /** A touch or two knocks in the night: the frame comes back for a while, turned down low. */
+    /**
+     * A touch or two knocks in the night: the frame comes back for a while, turned down low.
+     * Put to sleep by hand in the daytime, the same touch wakes it for good, so a stray
+     * "sleep now" does not cost the day.
+     */
     private fun peek() {
         if (!nightOn) return
+        if (night.napping(minuteOfDay())) {
+            sleep(false)
+            return
+        }
         peekUntil = SystemClock.uptimeMillis() + PEEK_MS
         root.removeCallbacks(peekOver)
         root.postDelayed(peekOver, PEEK_MS + 100)

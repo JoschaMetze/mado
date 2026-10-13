@@ -49,6 +49,17 @@ class NightTest {
     }
 
     @Test
+    fun onlySleepAskedForByDayIsANap() {
+        val night = NightClock()
+        assertFalse(night.napping(at(15)))
+        night.force(true, at(15))
+        assertTrue(night.napping(at(15, 1)))
+        // Once the night's own hours begin it is simply night.
+        assertFalse(night.napping(at(23, 30)))
+        assertFalse(NightClock().napping(at(2)))
+    }
+
+    @Test
     fun wakingAtNightLastsUntilTheNextEvening() {
         val night = NightClock()
         assertTrue(night.asleep(at(1)))

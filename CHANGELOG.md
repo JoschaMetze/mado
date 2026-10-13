@@ -11,7 +11,8 @@
 - Night mode. During its night hours the frame shows only a deep amber clock on black, with
   the backlight at its lowest and Tama asleep. Whispers and nudges that arrive are kept and
   shown in the morning; urgent alerts show at once. A touch or two knocks wakes it for 45
-  seconds, and music playing keeps it up. The hours (23:00 to 07:00 to begin with) are set on
+  seconds, or for good if it was put to sleep by hand outside its night hours. Music playing
+  keeps it up. The hours (23:00 to 07:00 to begin with) are set on
   the hub's page and kept by the frame, so nights work with the hub down. The rail has a
   Sleep switch, and `frame_sleep`, `frame_wake`, `POST /api/sleep` and `POST /api/wake` do the
   same from outside; `frame_state` says whether the frame is asleep.
