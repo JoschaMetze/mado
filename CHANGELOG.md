@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Frames find the hub by themselves. The hub announces itself on the local network over mDNS
+  and a frame with no hub connects to the one it finds, or asks which when there are several.
+  Tapping the hub's corner of the rail lists the hubs on the network and takes a typed
+  address. A hub found by name is followed if its address changes. The Docker image does not
+  announce itself unless it is given the host's network (`MADO_ADVERTISE`, `MADO_NAME`).
+- The dashboard says what it is doing after power-up instead of "Waiting for today's
+  painting": connecting to the hub (and which one), setting the clock, fetching the painting,
+  with a ring turning where the painting will hang. Until the network has set the clock it
+  shows dashes rather than a time in 1970, and it asks for the painting and the weather the
+  moment the clock is right, not up to a minute later.
 - A messages page, opened from the rail: every alert the frame has been sent, newest first,
   with who sent it, when, and what became of it (read, left by itself, never opened, kept
   for the morning, never shown). The frame keeps the last 200 across restarts.

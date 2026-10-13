@@ -95,11 +95,13 @@ Mado's, if you want the frame to be Mado from the moment it gets power.
 2. **The frame app.** With the frame connected over USB and `adb` working:
 
    ```sh
-   cd frame-app && ./run.sh ws://HOST:7878/frame
+   cd frame-app && ./run.sh
    ```
 
-   The hub address is remembered. Put machine-specific setup such as `JAVA_HOME` or
-   `ANDROID_SERIAL` in `frame-app/env.local.sh`.
+   A frame that has no hub looks for one on its network and connects by itself (see
+   "Finding the hub" below). To name the hub yourself instead, run
+   `./run.sh ws://HOST:7878/frame`; either way the address is remembered. Put
+   machine-specific setup such as `JAVA_HOME` or `ANDROID_SERIAL` in `frame-app/env.local.sh`.
 
 3. **The menu bar app** (optional), on the Mac with the music. It needs Xcode and
    [XcodeGen](https://github.com/yonaskolb/XcodeGen):
@@ -160,10 +162,30 @@ The hub has no authentication. Run it where only your own devices can reach it, 
 bound to a [Tailscale](https://tailscale.com) address, and never expose it to the internet.
 The frame does not need to be on the tailnet; it only needs to reach the hub.
 
+### Finding the hub
+
+The hub announces itself on the local network over mDNS (as a `_mado._tcp` service, the way
+printers and speakers do), and a frame with no hub looks for that announcement. One hub
+found: the frame connects to it. Several: it asks which, on its own screen. A hub found this
+way is remembered by name as well as address, so the frame finds it again if the address
+changes. `MADO_NAME` sets the name people see (default "Mado on" and the machine's name).
+
+Tap the hub's corner at the bottom of the rail to choose another hub or to type an address
+(`192.168.1.20`, `hub.local:7878`); `adb shell am start -n jp.co.xenocode.mado/.MainActivity
+--es hub ws://HOST:7878/frame` still works, and `--es hub none` makes the frame forget its
+hub and look again.
+
+The announcement does not leave a container on Docker's default network, so the Docker image
+keeps quiet (`MADO_ADVERTISE=off`) and a frame is given the address by hand. To have
+discovery with Docker on Linux, run the container with `network_mode: host` and
+`MADO_ADVERTISE=on`; `compose.yaml` shows how. Some networks, guest Wi-Fi especially, block
+mDNS altogether; then type the address.
+
 If the frame sits on a network you would rather not open the whole hub to, set
 `MADO_FRAME_BIND` (for example `0.0.0.0:7879`). The hub then opens a second port that serves
 only the frame's socket and the images it fetches, and you can keep the main port, with the
-web page, API and MCP, somewhere private. Point the frame at the second port. Anything that
+web page, API and MCP, somewhere private. Point the frame at the second port (it is the one
+the hub announces). Anything that
 can reach that port can pose as a frame and read what a frame is sent (alerts, projects,
 weather places), but cannot send or change anything.
 

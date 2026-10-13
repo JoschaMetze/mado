@@ -8,6 +8,11 @@ services:
       - "7878:7878"
     volumes:
       - mado-data:/data
+    # For frames to find the hub by themselves (Linux only): remove `ports` above and use
+    # the host's network, so the hub's mDNS announcement reaches the LAN.
+    # network_mode: host
+    # environment:
+    #   MADO_ADVERTISE: "on"
 
 volumes:
   mado-data:

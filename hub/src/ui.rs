@@ -602,7 +602,8 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
     <label>Anything with curl<pre>curl {scheme}://{host}/api/notify \
   -H 'content-type: application/json' \
   -d '{{"text":"Deploy finished","level":"nudge","source":"ci"}}'</pre></label>
-    <label>Point a frame at this hub, once, over USB<pre>adb shell am start -n jp.co.xenocode.mado/.MainActivity \
+    <p>A frame with no hub looks for one on its network and connects by itself, unless this hub runs in Docker or the network blocks mDNS. To choose by hand, tap the hub's corner at the bottom of the frame's rail, or:</p>
+    <label>Point a frame at this hub over USB<pre>adb shell am start -n jp.co.xenocode.mado/.MainActivity \
   --es hub ws://HUB_ADDRESS:PORT/frame</pre></label>
     <p class="muted small">The frame needs an address it can reach on its own network, which may differ from the one in your browser. State as JSON: <a href="/api/state">/api/state</a></p>
   </section>

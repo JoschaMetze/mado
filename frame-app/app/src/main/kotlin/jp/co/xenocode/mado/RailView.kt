@@ -29,6 +29,8 @@ class RailView(context: Context) : View(context) {
     var onTama: ((Boolean) -> Unit)? = null
     var onTamaSound: ((Boolean) -> Unit)? = null
     var onSleep: ((Boolean) -> Unit)? = null
+    /** The hub's corner was tapped: the way to choose another hub. */
+    var onHub: (() -> Unit)? = null
     /** Night mode is on, by the hours or because someone asked. */
     var asleep = false
         set(value) {
@@ -157,7 +159,7 @@ class RailView(context: Context) : View(context) {
 
         fill.color = if (linkUp) 0xFF4FD19C.toInt() else 0xFFFF7B7B.toInt()
         canvas.drawCircle(PAD + 5f, h - 58f, 5f, fill)
-        canvas.drawText(if (linkUp) "HUB CONNECTED" else "NO HUB", PAD + 20f, h - 53f, small)
+        canvas.drawText(if (linkUp) "HUB CONNECTED ›" else "NO HUB ›", PAD + 20f, h - 53f, small)
         val address = hubAddress?.removePrefix("ws://")?.removeSuffix("/frame") ?: "not set"
         small.alpha = 110
         canvas.drawText(TextUtils.ellipsize(address, small, W - 2 * PAD, TextUtils.TruncateAt.END).toString(), PAD, h - 30f, small)
@@ -236,6 +238,10 @@ class RailView(context: Context) : View(context) {
         val scene = ((downY - SCENE_Y) / ROW_STEP).toInt()
         when {
             !lifted -> settle(true)
+            downY > height - HUB_H -> {
+                settle(false)
+                onHub?.invoke()
+            }
             downY in homeY..homeY + LOW_STEP -> {
                 settle(false)
                 onHome?.invoke()
@@ -282,6 +288,7 @@ class RailView(context: Context) : View(context) {
         /** The switches under the slider sit closer together than the scenes, to leave the hub its corner. */
         private const val LOW_STEP = 56f
         private const val SCENE_Y = 96f
+        private const val HUB_H = 84f
         private const val AUTO_HIDE_MS = 6_000L
         private const val FG = 0xFFFFFFFF.toInt()
         private const val PANEL = 0xE6101319.toInt()

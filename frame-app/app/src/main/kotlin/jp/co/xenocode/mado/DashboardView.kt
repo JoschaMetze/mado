@@ -30,7 +30,9 @@ import kotlin.math.min
  * about it, the projects or the weather to open their pages; tap anywhere else to move to the
  * next layout.
  *
- * It is still unless something changes: one redraw a minute for the clock.
+ * It is still unless something changes: one redraw a minute for the clock. Before the first
+ * painting arrives it says what the frame is waiting for, and a ring turns where the painting
+ * will hang.
  */
 class DashboardView(context: Context) : View(context) {
     /**
@@ -62,6 +64,10 @@ class DashboardView(context: Context) : View(context) {
         }
 
     private var art = NO_ART
+    private var hasArt = false
+    private var startup = Startup(NO_ART.title, "", false)
+    /** False for the first moments after power-up, when the clock reads 1970. */
+    private var clockSet = true
     private var projects: List<Project> = emptyList()
     private var weather: Weather? = null
     private class Away(val weather: Weather) {
@@ -117,8 +123,26 @@ class DashboardView(context: Context) : View(context) {
     }
 
     fun setArt(art: Art?) {
-        this.art = art ?: NO_ART
-        val a = this.art
+        hasArt = art != null
+        show(art ?: waitingArt())
+    }
+
+    /** What to say until a painting is up; after that it is not shown. */
+    fun setStartup(startup: Startup) {
+        if (startup.title == this.startup.title && startup.detail == this.startup.detail && startup.busy == this.startup.busy) return
+        this.startup = startup
+        if (!hasArt) show(waitingArt())
+    }
+
+    /** The status dressed as a painting's label, so every layout shows it where the title goes. */
+    private fun waitingArt() = Art(
+        startup.title, startup.detail, "", "", "", "", null, null,
+        NO_ART.ink, NO_ART.paper, NO_ART.wall, NO_ART.accent, NO_ART.swatches,
+    )
+
+    private fun show(art: Art) {
+        this.art = art
+        val a = art
         learnTitle = StaticLayout.Builder.obtain(a.title, 0, a.title.length, type(42f, italic, WHITE), LEARN_TEXT_W)
             .setMaxLines(3).setEllipsize(TextUtils.TruncateAt.END).build()
         learnText = StaticLayout.Builder.obtain(a.text, 0, a.text.length, type(19f, sans, WHITE), LEARN_TEXT_W)
@@ -212,6 +236,7 @@ class DashboardView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         now.time = System.currentTimeMillis()
+        clockSet = now.time > CLOCK_SET_AFTER_MS
         val w = width.toFloat()
         val h = height.toFloat()
         studio.setEmpty()
@@ -234,9 +259,14 @@ class DashboardView(context: Context) : View(context) {
             postInvalidateOnAnimation()
         } else {
             learn = target
-            postInvalidateDelayed(60_000 - now.time % 60_000 + 50)
+            if (!hasArt && startup.busy) postInvalidateOnAnimation() else postInvalidateDelayed(60_000 - now.time % 60_000 + 50)
         }
     }
+
+    // Until the network has set the clock there is no time to show, only that there is none.
+    private fun time() = if (clockSet) clock.format(now) else "--:--"
+
+    private fun day(format: SimpleDateFormat) = if (clockSet) format.format(now) else ""
 
     private fun quiet(left: Float, top: Float, right: Float, bottom: Float) {
         textZones.add(RectF(left, top, right, bottom))
@@ -265,11 +295,11 @@ class DashboardView(context: Context) : View(context) {
         }
         if (projects.isNotEmpty()) studio.set(w - 564f, 24f, w, y - 14f)
 
-        val time = clock.format(now)
+        val time = time()
         canvas.drawText(time, 40f, h - 44f, type(186f, thin, WHITE, spacing = -0.02f, shadow = true))
         val x = 40f + text.measureText(time) + 26f
-        canvas.drawText(weekday.format(now).uppercase(), x, h - 82f, mono(WHITE, shadow = true, size = 16f))
-        canvas.drawText(dayMonth.format(now).uppercase(), x, h - 56f, mono(WHITE, shadow = true, size = 16f))
+        canvas.drawText(day(weekday).uppercase(), x, h - 82f, mono(WHITE, shadow = true, size = 16f))
+        canvas.drawText(day(dayMonth).uppercase(), x, h - 56f, mono(WHITE, shadow = true, size = 16f))
         quiet(30f, h - 188f, x + 190f, h - 24f)
 
         val awayA = away.take(3)
@@ -315,12 +345,12 @@ class DashboardView(context: Context) : View(context) {
 
         val x = 716f
         val right = w - 70f
-        val time = clock.format(now)
+        val time = time()
         canvas.drawText(time, x - 8f, 206f, type(176f, thin, art.paper, spacing = -0.02f))
         // The date sits centred under the numerals themselves.
         text.getTextBounds(time, 0, time.length, bounds)
         val middle = x - 8f + (bounds.left + bounds.right) / 2f
-        canvas.drawText("${weekday.format(now)} · ${dayMonth.format(now)}".uppercase(), middle, 252f, mono(art.paper, 0.72f, 16f, Paint.Align.CENTER))
+        if (clockSet) canvas.drawText("${weekday.format(now)} · ${dayMonth.format(now)}".uppercase(), middle, 252f, mono(art.paper, 0.72f, 16f, Paint.Align.CENTER))
         rule(canvas, x, right, 290f)
         var sectionEnd = 290f
         weather?.let {
@@ -368,9 +398,9 @@ class DashboardView(context: Context) : View(context) {
 
         val x = split + 42f
         val right = w - 44f
-        canvas.drawText(hour.format(now), x - 10f, 206f, type(218f, heavy, art.accent, spacing = -0.05f))
-        canvas.drawText(minute.format(now), x - 10f, 392f, type(218f, heavy, art.paper, spacing = -0.05f))
-        canvas.drawText(shortDate.format(now).uppercase(), x, 438f, mono(art.paper, 0.7f, 16f))
+        canvas.drawText(if (clockSet) hour.format(now) else "--", x - 10f, 206f, type(218f, heavy, art.accent, spacing = -0.05f))
+        canvas.drawText(if (clockSet) minute.format(now) else "--", x - 10f, 392f, type(218f, heavy, art.paper, spacing = -0.05f))
+        canvas.drawText(day(shortDate).uppercase(), x, 438f, mono(art.paper, 0.7f, 16f))
         weather?.let {
             canvas.drawText(fit("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", type(23f, bold, art.paper), right - x), x, 480f, text)
             spots.add(RectF(split, 450f, w, 492f) to it)
@@ -443,7 +473,7 @@ class DashboardView(context: Context) : View(context) {
                 fill.color = MAT
                 canvas.drawRect(cx - 57f, h - 250f, cx + 57f, h - 136f, fill)
                 dst.set(cx - 52f, h - 245f, cx + 52f, h - 141f)
-                drawCover(canvas)
+                drawCover(canvas, art.ink)
                 val title = StaticLayout.Builder.obtain(art.title, 0, art.title.length, type(17f, italic, on), (right - left - 24f).toInt())
                     .setAlignment(Layout.Alignment.ALIGN_CENTER).setMaxLines(2).setEllipsize(TextUtils.TruncateAt.END).build()
                 canvas.save()
@@ -475,7 +505,7 @@ class DashboardView(context: Context) : View(context) {
         }
         if (projects.isNotEmpty()) studio.set(0f, h - 262f, edges[2] * w, h)
         if (projects.size > 2) studio2.set(edges[3] * w, h - 262f, w, h)
-        canvas.drawText(clock.format(now), w / 2, 320f, type(290f, thin, WHITE, spacing = -0.03f, align = Paint.Align.CENTER, shadow = true))
+        canvas.drawText(time(), w / 2, 320f, type(290f, thin, WHITE, spacing = -0.03f, align = Paint.Align.CENTER, shadow = true))
         weather?.let {
             canvas.drawText("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", w / 2, 396f, type(32f, italic, WHITE, align = Paint.Align.CENTER, shadow = true))
             spots.add(RectF(w / 2 - 390f, 352f, w / 2 + 390f, 412f) to it)
@@ -499,8 +529,9 @@ class DashboardView(context: Context) : View(context) {
         plaque.set(x - 16f, y - 10f, x + width, y + 96f)
     }
 
-    private fun drawCover(canvas: Canvas) {
-        val image = art.image ?: return
+    /** `waiting` is the colour of the ring drawn while there is no painting yet. */
+    private fun drawCover(canvas: Canvas, waiting: Int = art.paper) {
+        val image = art.image ?: return drawWaiting(canvas, waiting)
         val scale = max(dst.width() / image.width, dst.height() / image.height)
         val sw = dst.width() / scale
         val sh = dst.height() / scale
@@ -510,12 +541,33 @@ class DashboardView(context: Context) : View(context) {
 
     /** Shrinks `dst` to the painting's own proportions, so nothing is cropped. */
     private fun drawFitted(canvas: Canvas) {
-        val image = art.image ?: return
+        val image = art.image ?: return drawWaiting(canvas, art.ink)
         val scale = min(dst.width() / image.width, dst.height() / image.height)
         val w = image.width * scale
         val h = image.height * scale
         dst.set(dst.centerX() - w / 2, dst.centerY() - h / 2, dst.centerX() + w / 2, dst.centerY() + h / 2)
         canvas.drawBitmap(image, null, dst, picture)
+    }
+
+    /**
+     * A ring of dots in the middle of `dst`, the brightest one going round: something is on
+     * its way. Circles only: the frame's GPU smudges scaled paths.
+     */
+    private fun drawWaiting(canvas: Canvas, color: Int) {
+        if (hasArt || !startup.busy) return
+        val r = min(34f, min(dst.width(), dst.height()) * 0.16f)
+        val turn = (android.os.SystemClock.uptimeMillis() % WAITING_TURN_MS) / WAITING_TURN_MS.toFloat()
+        for (i in 0 until WAITING_DOTS) {
+            val at = i / WAITING_DOTS.toFloat()
+            // 1 at the leading dot, falling away behind it.
+            val lead = 1f - (turn - at + 1f) % 1f
+            fill.color = withAlpha(color, 0.12f + 0.78f * lead * lead)
+            val angle = at * 2 * Math.PI - Math.PI / 2
+            canvas.drawCircle(
+                dst.centerX() + r * Math.cos(angle).toFloat(), dst.centerY() + r * Math.sin(angle).toFloat(),
+                r * (0.1f + 0.06f * lead), fill,
+            )
+        }
     }
 
     /** A thin separator, as between "here" and the other places. */
@@ -603,6 +655,8 @@ class DashboardView(context: Context) : View(context) {
         private const val AWAY_STEP = 27f
         private const val LEARN_W = 564f
         private const val LEARN_TEXT_W = 460
+        private const val WAITING_DOTS = 10
+        private const val WAITING_TURN_MS = 1_400L
         private const val WHITE = 0xFFFFFFFF.toInt()
         private const val MAT = 0xFFF5F0E6.toInt()
 

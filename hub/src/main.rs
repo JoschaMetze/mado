@@ -4,6 +4,7 @@
 //! plain HTTP (`/api/*`), MCP (`/mcp`) or the web interface (`/`); the hub relays to the frame.
 
 mod art;
+mod discover;
 mod mcp;
 mod nowplaying;
 mod projects;
@@ -533,8 +534,9 @@ async fn main() {
 
     // MADO_FRAME_BIND opens a second port that serves only the frame's routes. It lets the
     // frame reach the hub on a network where the API, MCP and web page must not be exposed.
-    if let Ok(frame_bind) = std::env::var("MADO_FRAME_BIND") {
-        let listener = listen(&frame_bind).await;
+    let frame_bind = std::env::var("MADO_FRAME_BIND").ok();
+    if let Some(frame_bind) = &frame_bind {
+        let listener = listen(frame_bind).await;
         println!("mado-hub listening for frames only on {frame_bind}");
         let frame_app = frame_routes.with_state(hub);
         tokio::spawn(async move { axum::serve(listener, frame_app).await });
@@ -542,10 +544,28 @@ async fn main() {
 
     let listener = listen(&bind).await;
     println!("mado-hub listening on http://{bind}");
+    // Frames find the hub by its announcement. MADO_ADVERTISE=off keeps it quiet, for a hub
+    // behind a container's own network, where the announcement would not reach anyone.
+    let announcement = if std::env::var("MADO_ADVERTISE").is_ok_and(|v| v == "off" || v == "0") {
+        None
+    } else {
+        let port = discover::port_of(frame_bind.as_deref().unwrap_or(&bind));
+        let announced = port
+            .ok_or_else(|| "no port in the bind address".to_string())
+            .and_then(|port| discover::announce(port, std::env::var("MADO_NAME").ok()));
+        // A hub that cannot announce itself still works for a frame given its address.
+        announced
+            .map_err(|e| eprintln!("not announced on the local network: {e}"))
+            .ok()
+    };
     // Frames hold their socket open for good, so waiting for connections to drain would
     // only mean waiting to be killed. Nothing here needs a slow goodbye.
-    tokio::spawn(async {
+    tokio::spawn(async move {
         stop_signal().await;
+        // Say goodbye, so frames looking for a hub stop being offered this one.
+        if let Some(Ok(done)) = announcement.map(|a| a.shutdown()) {
+            let _ = done.recv_timeout(std::time::Duration::from_secs(1));
+        }
         std::process::exit(0);
     });
     axum::serve(listener, app).await.unwrap();

@@ -105,8 +105,15 @@ Check it, then find the address the frame should use:
 curl -s http://localhost:7878/api/state
 ```
 
-Use an address that will not change: a hostname, or an IP the router has reserved. A laptop
-that moves between Wi-Fi and Ethernet changes address, and the frame then shows "no hub".
+A hub run without Docker announces itself on the local network (mDNS, `_mado._tcp`), and a
+frame with no hub finds it and connects by itself; it then follows the hub by name if its
+address changes. The Docker image does not announce itself, because the announcement would
+not leave the container's network: either give the frame the address by hand (next step), or
+on Linux use host networking as `compose.yaml` describes.
+
+When giving an address by hand, use one that will not change: a hostname, or an IP the
+router has reserved. A laptop that moves between Wi-Fi and Ethernet changes address, and the
+frame then shows "no hub".
 
 The hub has no authentication. It must not be reachable from the internet. If the owner uses
 Tailscale or similar, bind or firewall it so only their devices can reach it. A machine with
@@ -116,8 +123,13 @@ a host firewall may need port 7878 opened for the frame.
 
 ```sh
 cd frame-app
-./run.sh ws://HUB_ADDRESS:7878/frame
+./run.sh                                  # the frame looks for the hub by itself
+./run.sh ws://HUB_ADDRESS:7878/frame      # or: tell it where the hub is
 ```
+
+Without an address the dashboard says "Looking for a hub" until it finds one, usually within
+a few seconds. If it keeps looking, the network is not passing mDNS or the hub is in Docker:
+give the address, here or by tapping the hub's corner at the bottom of the rail on the frame.
 
 This builds a debug APK, installs it, launches it, and tells it where the hub is (the address
 is remembered). Then confirm from the hub's side:

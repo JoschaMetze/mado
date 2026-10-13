@@ -2,6 +2,7 @@ package jp.co.xenocode.mado
 
 import android.animation.ValueAnimator
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -14,6 +15,9 @@ import android.util.Base64
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.text.InputType
+import android.widget.ArrayAdapter
+import android.widget.EditText
 import android.widget.FrameLayout
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -73,6 +77,37 @@ class MainActivity : Activity(), HubLink.Listener {
             askForPainting()
             root.postDelayed(this, 60_000)
         }
+    }
+    private var hubUp = false
+    private var paintingUp = false
+    private var clockSet = false
+    /** Until the first painting is up, the dashboard says what the frame is waiting for. */
+    private val startupWatch = object : Runnable {
+        override fun run() {
+            root.removeCallbacks(this)
+            val hub = prefs().getString("hub", null)
+            val set = System.currentTimeMillis() > CLOCK_SET_AFTER_MS
+            if (set && !clockSet) {
+                // The network has just set the clock. Until then nothing over HTTPS could work.
+                clockSet = true
+                refreshWeather()
+                dashboard.invalidate()
+            }
+            dashboard.setStartup(startup(hub, hubUp, set, if (hub == null) finder.hubs.size else 0))
+            askForPainting()
+            if (hub != null && !paintingUp) root.postDelayed(this, 1_000)
+        }
+    }
+    private val finder by lazy { HubFinder(this, ::hubsFound) }
+    private var chooser: AlertDialog? = null
+    private var refreshChooser: (() -> Unit)? = null
+    /** When the hub was last lost, in uptime; 0 while it is connected. */
+    private var hubDownSince = 0L
+    /** A hub found alone is taken once others have had a moment to turn up too. */
+    private val settleOnHub = Runnable {
+        val hubs = finder.hubs
+        if (prefs().getString("hub", null) != null || chooser != null) return@Runnable
+        if (hubs.size == 1) adopt(hubs[0].url, hubs[0].name) else if (hubs.size > 1) chooseHub()
     }
     private var playState = ""
     private val backHome = Runnable { showScene(HOME) }
@@ -172,6 +207,7 @@ class MainActivity : Activity(), HubLink.Listener {
             }
             // The frame has no Home key, so the rail is the way out to the launcher.
             onHome = ::leaveToLauncher
+            onHub = ::chooseHub
         }
         markRail()
         nightView = NightView(this).apply { onWake = ::peek }
@@ -186,11 +222,13 @@ class MainActivity : Activity(), HubLink.Listener {
             addView(rail)
         }
         setContentView(root)
+        clockSet = System.currentTimeMillis() > CLOCK_SET_AFTER_MS
         adoptHubAddress(intent)
         connect()
         root.postDelayed(dayWatch, 60_000)
         weatherSource = WeatherSource(this)
         weatherWatch.run()
+        startupWatch.run()
         readNightHours()
         nightWatch.run()
     }
@@ -230,6 +268,7 @@ class MainActivity : Activity(), HubLink.Listener {
 
     override fun onDestroy() {
         link?.stop()
+        finder.stop()
         super.onDestroy()
     }
 
@@ -241,8 +280,85 @@ class MainActivity : Activity(), HubLink.Listener {
 
     private fun adoptHubAddress(intent: Intent?): Boolean {
         val hub = intent?.getStringExtra("hub") ?: return false
-        prefs().edit().putString("hub", hub).apply()
+        // `--es hub none` forgets the hub, and the frame goes looking for one on the network.
+        if (hub == "none") prefs().edit().remove("hub").remove("hub_name").apply()
+        else prefs().edit().putString("hub", hub).remove("hub_name").apply()
         return true
+    }
+
+    /**
+     * Use this hub from now on. `name` is what it announces itself as, when it was found on the
+     * network rather than typed: a hub found by name is found again if its address changes.
+     */
+    private fun adopt(url: String, name: String?) {
+        val edit = prefs().edit().putString("hub", url)
+        if (name == null) edit.remove("hub_name") else edit.putString("hub_name", name)
+        edit.apply()
+        root.removeCallbacks(settleOnHub)
+        finder.stop()
+        hubDownSince = 0
+        connect()
+        startupWatch.run()
+    }
+
+    private fun hubsFound(hubs: List<FoundHub>) {
+        val saved = prefs().getString("hub", null)
+        if (saved == null) {
+            root.removeCallbacks(settleOnHub)
+            if (hubs.isNotEmpty()) root.postDelayed(settleOnHub, SETTLE_ON_HUB_MS)
+            startupWatch.run()
+        } else if (!hubUp && chooser == null) {
+            val name = prefs().getString("hub_name", null)
+            hubs.firstOrNull { it.name == name && it.url != saved }?.let { adopt(it.url, it.name) }
+        }
+        refreshChooser?.invoke()
+    }
+
+    /** The hubs on this network, to tap, and a way to type an address instead. */
+    private fun chooseHub() {
+        if (chooser != null) return
+        finder.start()
+        val rows = ArrayAdapter<String>(this, android.R.layout.simple_list_item_1)
+        var shown = emptyList<FoundHub>()
+        val fill = {
+            shown = finder.hubs
+            rows.clear()
+            rows.addAll(shown.map { "${it.name}  ·  ${it.url.substringAfter("://").substringBefore("/")}" })
+            rows.add("Type an address…")
+        }
+        fill()
+        refreshChooser = fill
+        chooser = AlertDialog.Builder(this)
+            .setTitle("Choose a hub")
+            .setAdapter(rows) { _, i ->
+                val hub = shown.getOrNull(i)
+                if (hub != null) adopt(hub.url, hub.name) else typeHub()
+            }
+            .setNegativeButton("Cancel", null)
+            .setOnDismissListener {
+                chooser = null
+                refreshChooser = null
+                if (hubUp) finder.stop()
+            }
+            .show()
+    }
+
+    private fun typeHub() {
+        val field = EditText(this).apply {
+            hint = "192.168.1.20:$HUB_PORT"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine()
+        }
+        val box = FrameLayout(this).apply {
+            setPadding(40, 16, 40, 0)
+            addView(field)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Hub address")
+            .setView(box)
+            .setPositiveButton("Connect") { _, _ -> typedHubUrl(field.text.toString())?.let { adopt(it, null) } }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /**
@@ -379,7 +495,10 @@ class MainActivity : Activity(), HubLink.Listener {
         onHubLink(false)
         val hub = prefs().getString("hub", null)
         rail.hubAddress = hub
-        if (hub == null) return
+        if (hub == null) {
+            finder.start()
+            return
+        }
         val hello = JSONObject()
             .put("t", "hello")
             .put("model", "${Build.MANUFACTURER} ${Build.MODEL}")
@@ -398,10 +517,20 @@ class MainActivity : Activity(), HubLink.Listener {
         if (!up) hubHearsTama = false
         if (!up) hubHearsNight = false
         rail.linkUp = up
+        hubUp = up
+        val uptime = SystemClock.uptimeMillis()
         if (up) {
-            paintingDay = ""
-            askForPainting()
+            hubDownSince = 0
+            if (chooser == null) finder.stop()
+        } else if (hubDownSince == 0L) {
+            hubDownSince = uptime
+        } else if (uptime - hubDownSince > LOOK_AGAIN_MS && prefs().getString("hub_name", null) != null) {
+            // Out of reach for a while. If it was found by name, it may be at a new address.
+            finder.start()
         }
+        if (up) paintingDay = ""
+        // Asks for the painting too. Before onCreate has built the weather client it is not yet time.
+        if (::weatherSource.isInitialized) startupWatch.run()
     }
 
     // The first place in the hub's list is "here"; the rest are other places that matter
@@ -489,6 +618,7 @@ class MainActivity : Activity(), HubLink.Listener {
                             swatches = IntArray(5) { i -> parse(swatches?.optString(i), Color.GRAY) },
                         )
                     dashboard.setArt(art)
+                    paintingUp = true
                     tama.notice()
                     projectsPage.setArt(art)
                     messagesPage.setArt(art)
@@ -756,6 +886,8 @@ class MainActivity : Activity(), HubLink.Listener {
         const val PAUSED_LINGER_MS = 120_000L
         const val STOPPED_LINGER_MS = 10_000L
         const val NIGHT_CHECK_MS = 15_000L
+        const val SETTLE_ON_HUB_MS = 2_500L
+        const val LOOK_AGAIN_MS = 30_000L
         const val NIGHT_FADE_MS = 2_500L
         const val WAKE_FADE_MS = 600L
         const val PEEK_MS = 45_000L
