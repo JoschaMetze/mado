@@ -339,7 +339,7 @@ class DashboardView(context: Context) : View(context) {
         var y = top
         for (p in projects) {
             drawIcon(canvas, p, x, y + 7f, 38f)
-            drawMark(canvas, p.status, x + 59f, y + 13f)
+            drawMark(canvas, p.status, x + 59f, y + 26f)
             canvas.drawText(p.name, x + 82f, y + 20f, type(21f, bold, art.paper))
             val after = x + 82f + text.measureText(p.name)
             canvas.drawText(" · ${word(p.status)}", after, y + 20f, type(21f, sans, art.paper, 0.85f))
