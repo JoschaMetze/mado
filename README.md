@@ -17,7 +17,8 @@ it stays smooth on very modest hardware.
   You choose what it draws from: a period, a subject, and what to leave out.
 - **Weather in a sentence.** "Rain easing by three", with the temperature and sunset. Other
   places you care about get a line each, with their local time. The frame fetches forecasts
-  itself, so weather keeps working when the hub is down.
+  itself, so weather keeps working when the hub is down. Tap the weather for a page with the
+  place's sky, the next 24 hours, the week, and a tab for each place.
 - **Project status from your agents.** An agent reports where a project stands and the
   dashboard keeps the latest word on each, beside its icon (or its initials, if it has
   none). Tap them for a page of every project with its whole note.

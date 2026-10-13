@@ -22,6 +22,13 @@
   to leave out (religious scenes, nudes, death and war). Set on the hub's page, which then
   picks a new painting that fits and says how many it chose from.
 - Hub page: "Recent" shows the newest six lines and folds the rest away.
+- Frame: tap the weather on the dashboard for a weather page. The place's sky fills the glass
+  (its colour by day and night, with cloud, rain, snow, stars or lightning), the sun or moon
+  sits on its arc between sunrise and sunset, the next 24 hours are a temperature curve over
+  the chance of rain, and the week is a strip along the bottom. Every place has a tab; tap one
+  or drag sideways and the sky and the curve flow into the other place. Tapping another
+  place's line on the dashboard opens the page there. A tap closes it, and it closes by itself
+  after two minutes.
 - Frame: tap the projects on the dashboard for a page of all of them, with each one's whole
   note, progress and when it was last reported. It scrolls when the list is long; a tap
   closes it, and it closes by itself after two minutes.

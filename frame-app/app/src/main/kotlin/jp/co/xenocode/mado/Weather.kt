@@ -13,6 +13,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.security.KeyStore
 import java.security.cert.CertificateFactory
+import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
@@ -30,9 +31,26 @@ class Weather(
     val timezone: String,
     val isDay: Boolean,
     val sky: Sky = Sky.CLOUD,
+    /** The hours and days ahead, for the weather page; null when the forecast had none. */
+    val outlook: Outlook? = null,
 ) {
     val detail get() = "$tempC° now · $highC° high" + if (sunset.isEmpty()) "" else " · sunset $sunset"
 }
+
+/** One of the days ahead. `chance` is of rain or snow, in percent. */
+class Day(val name: String, val code: Int, val highC: Int, val lowC: Int, val chance: Int)
+
+/**
+ * What the weather page draws beyond today's sentence. The hourly arrays start at the current
+ * hour of the place's own day (`hour`) and run a day ahead; codes are WMO weather codes.
+ */
+class Outlook(
+    val code: Int, val feelsC: Int, val windKmh: Int, val humidity: Int,
+    /** Minutes into the place's day, -1 when unknown. `nextSunriseMin` is tomorrow's. */
+    val sunriseMin: Int, val sunsetMin: Int, val nextSunriseMin: Int,
+    val hour: Int, val temps: FloatArray, val codes: IntArray, val chance: IntArray, val light: BooleanArray,
+    val days: List<Day>,
+)
 
 /**
  * The frame fetches its own forecast from Open-Meteo, so weather keeps working when the hub
@@ -66,9 +84,11 @@ class WeatherSource(context: Context) {
         // Two decimals is about a kilometre: plenty for a forecast, vaguer than an address.
         val url = String.format(
             Locale.US,
-            "https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f&current=temperature_2m,weather_code,is_day" +
-                "&hourly=weather_code,precipitation_probability&daily=temperature_2m_max,temperature_2m_min,sunset" +
-                "&timezone=auto&forecast_days=2",
+            "https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f" +
+                "&current=temperature_2m,weather_code,is_day,apparent_temperature,wind_speed_10m,relative_humidity_2m" +
+                "&hourly=weather_code,precipitation_probability,temperature_2m,is_day" +
+                "&daily=temperature_2m_max,temperature_2m_min,sunset,sunrise,weather_code,precipitation_probability_max" +
+                "&timezone=auto&forecast_days=7",
             lat, lon,
         )
         client.newCall(Request.Builder().url(url).build()).enqueue(object : Callback {
@@ -109,6 +129,49 @@ class WeatherSource(context: Context) {
             timezone = json.optString("timezone"),
             isDay = current.optInt("is_day", 1) == 1,
             sky = Forecast.sky(current.getInt("weather_code")),
+            // The page's extras are not worth losing today's weather over.
+            outlook = try {
+                outlook(current, hourly, daily, hour)
+            } catch (e: Exception) {
+                null
+            },
+        )
+    }
+
+    private fun outlook(current: JSONObject, hourly: JSONObject, daily: JSONObject, hour: Int): Outlook? {
+        val temps = hourly.getJSONArray("temperature_2m")
+        val codes = hourly.getJSONArray("weather_code")
+        val chance = hourly.getJSONArray("precipitation_probability")
+        val light = hourly.getJSONArray("is_day")
+        val hours = minOf(25, temps.length() - hour)
+        if (hours < 2) return null
+        val dates = daily.getJSONArray("time")
+        val dayCodes = daily.getJSONArray("weather_code")
+        val highs = daily.getJSONArray("temperature_2m_max")
+        val lows = daily.getJSONArray("temperature_2m_min")
+        val wet = daily.getJSONArray("precipitation_probability_max")
+        val sunrise = daily.getJSONArray("sunrise")
+        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val weekday = SimpleDateFormat("EEE", Locale.US)
+        return Outlook(
+            code = current.getInt("weather_code"),
+            feelsC = current.getDouble("apparent_temperature").roundToInt(),
+            windKmh = current.getDouble("wind_speed_10m").roundToInt(),
+            humidity = current.getInt("relative_humidity_2m"),
+            sunriseMin = Daylight.minutes(sunrise.optString(0)),
+            sunsetMin = Daylight.minutes(daily.getJSONArray("sunset").optString(0)),
+            nextSunriseMin = Daylight.minutes(sunrise.optString(1)),
+            hour = hour,
+            temps = FloatArray(hours) { temps.getDouble(hour + it).toFloat() },
+            codes = IntArray(hours) { codes.optInt(hour + it) },
+            chance = IntArray(hours) { chance.optInt(hour + it, 0) },
+            light = BooleanArray(hours) { light.optInt(hour + it, 1) == 1 },
+            days = List(minOf(7, dates.length())) { i ->
+                Day(
+                    if (i == 0) "Today" else weekday.format(date.parse(dates.getString(i))!!),
+                    dayCodes.optInt(i), highs.getDouble(i).roundToInt(), lows.getDouble(i).roundToInt(), wet.optInt(i, 0),
+                )
+            },
         )
     }
 }
@@ -175,4 +238,31 @@ object Forecast {
             else -> if (code == 2) "Some cloud, staying dry" else "Overcast, staying dry"
         }
     }
+}
+
+/** Where the sun or the moon is on its way across the sky. Times are minutes into the day. */
+object Daylight {
+    /** "2026-10-13T05:48" is 348; anything else is -1. */
+    fun minutes(time: String): Int {
+        val clock = time.substringAfter('T', "").split(':')
+        val h = clock.getOrNull(0)?.toIntOrNull() ?: return -1
+        val m = clock.getOrNull(1)?.toIntOrNull() ?: return -1
+        return h * 60 + m
+    }
+
+    fun up(now: Int, sunrise: Int, sunset: Int) = now in sunrise until sunset
+
+    /**
+     * How far along its arc the sun is by day, or the moon by night: 0 rising, 1 setting. The
+     * night is taken to run from today's sunset to a sunrise at the same time tomorrow.
+     */
+    fun along(now: Int, sunrise: Int, sunset: Int): Float {
+        if (sunset <= sunrise) return 0.5f
+        if (up(now, sunrise, sunset)) return (now - sunrise).toFloat() / (sunset - sunrise)
+        val night = 1440 - (sunset - sunrise)
+        return ((now - sunset + 1440) % 1440).toFloat() / night
+    }
+
+    /** Minutes until `then` comes round, today or tomorrow. */
+    fun until(now: Int, then: Int) = (then - now + 1440) % 1440
 }

@@ -31,6 +31,7 @@ class MainActivity : Activity(), HubLink.Listener {
     private lateinit var nowPlaying: NowPlayingView
     private lateinit var dashboard: DashboardView
     private lateinit var projectsPage: ProjectsView
+    private lateinit var weatherPage: WeatherView
     private var projectList: List<DashboardView.Project> = emptyList()
     /** Project icons by the hub's name for them; a new picture has a new name. */
     private val projectIcons = HashMap<String, Bitmap>()
@@ -50,6 +51,7 @@ class MainActivity : Activity(), HubLink.Listener {
     private val backHome = Runnable { showScene(HOME) }
     private var link: HubLink? = null
     private lateinit var weatherSource: WeatherSource
+    private var here: Weather? = null
     private var away = arrayOfNulls<Weather>(0)
     private val weatherWatch = object : Runnable {
         override fun run() {
@@ -78,8 +80,12 @@ class MainActivity : Activity(), HubLink.Listener {
             layout = prefs().getInt("dashboard_layout", DashboardView.FULL_BLEED)
             onLayoutChosen = { prefs().edit().putInt("dashboard_layout", it).apply() }
             onProjects = { projectsPage.open() }
+            onWeather = { place, x, y -> weatherPage.open(place, x, y) }
         }
         projectsPage = ProjectsView(this)
+        weatherPage = WeatherView(this).apply {
+            onCover = { covered -> scenes[scene].visibility = if (covered) View.INVISIBLE else View.VISIBLE }
+        }
         scenes = listOf(dashboard, nowPlaying)
         tama = TamaView(this).apply {
             visibility = if (prefs().getBoolean("tama", true)) View.VISIBLE else View.GONE
@@ -87,7 +93,9 @@ class MainActivity : Activity(), HubLink.Listener {
             onDoing = ::reportTama
             keepOut = {
                 tamaZones.clear()
-                tamaZones.addAll(if (scene == DASHBOARD) dashboard.textZones else nowPlaying.textZones)
+                tamaZones.addAll(
+                    if (weatherPage.isOpen) weatherPage.textZones else if (scene == DASHBOARD) dashboard.textZones else nowPlaying.textZones
+                )
                 if (!alerts.zone.isEmpty) tamaZones.add(alerts.zone)
                 tamaZones
             }
@@ -120,6 +128,7 @@ class MainActivity : Activity(), HubLink.Listener {
         root = FrameLayout(this).apply {
             scenes.forEach(::addView)
             addView(projectsPage)
+            addView(weatherPage)
             addView(tama)
             addView(alerts)
             addView(rail)
@@ -148,6 +157,13 @@ class MainActivity : Activity(), HubLink.Listener {
                 tama.pinFace(it.getOrElse(0) { "" }, it.getOrElse(1) { "" }, it.getOrElse(2) { "" }, it.getOrNull(3) == "tear")
             }
             if (intent.hasExtra("tama_music")) tama.music = intent.getBooleanExtra("tama_music", false)
+            // The weather page under another sky: `--es weather storm --ez weather_night true`
+            // (`--es weather real` for the one outside). The number picks the place's tab.
+            intent.getStringExtra("weather")?.let { wanted ->
+                val pretend = Sky.values().firstOrNull { it.name.equals(wanted, ignoreCase = true) }
+                weatherPage.pretend(pretend, if (pretend != null || intent.hasExtra("weather_night")) intent.getBooleanExtra("weather_night", false) else null)
+                weatherPage.open(weatherPlaces().getOrNull(intent.getIntExtra("weather_place", 0)), root.width / 2f, root.height / 2f)
+            }
         }
     }
 
@@ -231,20 +247,27 @@ class MainActivity : Activity(), HubLink.Listener {
         }
         val here = places?.optJSONObject(0)
         if (here == null) {
+            this.here = null
             dashboard.setWeather(null)
             tama.setWeather(null)
+            weatherPage.setPlaces(weatherPlaces())
         }
         // A failed refresh keeps the last forecast on screen rather than blanking it.
         here?.let { p -> weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) {
             if (it != null) {
+                this.here = it
                 dashboard.setWeather(it)
                 tama.setWeather(it)
+                weatherPage.setPlaces(weatherPlaces())
             }
         } }
 
         val others = (1 until (places?.length() ?: 0)).mapNotNull { places?.optJSONObject(it) }
         if (others.size != away.size) away = arrayOfNulls(others.size)
-        if (others.isEmpty()) dashboard.setAway(emptyList())
+        if (others.isEmpty()) {
+            dashboard.setAway(emptyList())
+            weatherPage.setPlaces(weatherPlaces())
+        }
         val slots = away
         others.forEachIndexed { i, p ->
             weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) {
@@ -252,10 +275,14 @@ class MainActivity : Activity(), HubLink.Listener {
                 if (it != null && slots === away) {
                     slots[i] = it
                     dashboard.setAway(slots.filterNotNull())
+                    weatherPage.setPlaces(weatherPlaces())
                 }
             }
         }
     }
+
+    /** Every place there is a forecast for, here first: the weather page's tabs. */
+    private fun weatherPlaces() = listOfNotNull(here) + away.filterNotNull()
 
     /** The frame owns the date: it asks the hub for a painting once per local day. */
     private fun askForPainting() {
@@ -383,6 +410,7 @@ class MainActivity : Activity(), HubLink.Listener {
     private fun showScene(index: Int) {
         if (index == scene) return
         projectsPage.close()
+        weatherPage.close()
         val leaving = scenes[scene]
         val arriving = scenes[index]
         scene = index

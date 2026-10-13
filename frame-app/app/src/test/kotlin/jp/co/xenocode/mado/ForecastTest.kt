@@ -75,4 +75,36 @@ class ForecastTest {
     fun aShortForecastDoesNotCrash() {
         assertEquals("Rain through the night", Forecast.sentence(22, false, rain, IntArray(24) { rain }, IntArray(24) { 90 }))
     }
+
+    @Test
+    fun aLongerForecastSaysTheSameThing() {
+        val week = IntArray(168) { h -> if (h in 17..19) showers else partly }
+        assertEquals("Showers from five", Forecast.sentence(9, true, partly, week, IntArray(168) { 90 }))
+    }
+
+    @Test
+    fun clockTimesBecomeMinutes() {
+        assertEquals(348, Daylight.minutes("2026-10-13T05:48"))
+        assertEquals(-1, Daylight.minutes(""))
+        assertEquals(-1, Daylight.minutes("2026-10-13"))
+    }
+
+    @Test
+    fun theSunCrossesByDayAndTheMoonByNight() {
+        val rise = 6 * 60
+        val set = 18 * 60
+        assertEquals(0f, Daylight.along(rise, rise, set), 0.001f)
+        assertEquals(0.5f, Daylight.along(12 * 60, rise, set), 0.001f)
+        assertEquals(0f, Daylight.along(set, rise, set), 0.001f)
+        assertEquals(0.5f, Daylight.along(0, rise, set), 0.001f)
+        assertEquals(0.75f, Daylight.along(3 * 60, rise, set), 0.001f)
+        // A forecast with no sun times puts it overhead rather than dividing by zero.
+        assertEquals(0.5f, Daylight.along(600, -1, -1), 0.001f)
+    }
+
+    @Test
+    fun timeUntilSunriseWrapsPastMidnight() {
+        assertEquals(30, Daylight.until(17 * 60, 17 * 60 + 30))
+        assertEquals(7 * 60, Daylight.until(23 * 60, 6 * 60))
+    }
 }

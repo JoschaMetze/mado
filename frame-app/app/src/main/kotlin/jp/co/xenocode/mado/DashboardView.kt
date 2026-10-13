@@ -27,7 +27,8 @@ import kotlin.math.min
 /**
  * The home scene: a painting of the day, the time, and the projects agents report on, in four
  * layouts that all take their colours from the painting. Tap the painting's label to read
- * about it, the projects to open their page; tap anywhere else to move to the next layout.
+ * about it, the projects or the weather to open their pages; tap anywhere else to move to the
+ * next layout.
  *
  * It is still unless something changes: one redraw a minute for the clock.
  */
@@ -52,6 +53,8 @@ class DashboardView(context: Context) : View(context) {
 
     var onLayoutChosen: ((Int) -> Unit)? = null
     var onProjects: (() -> Unit)? = null
+    /** A place's weather was tapped, at this point on the glass. */
+    var onWeather: ((Weather, Float, Float) -> Unit)? = null
     var layout = FULL_BLEED
         set(value) {
             field = value % LAYOUTS
@@ -100,6 +103,8 @@ class DashboardView(context: Context) : View(context) {
     /** Where the projects are in the current layout, for taps; the pigments layout has two groups. */
     private val studio = RectF()
     private val studio2 = RectF()
+    /** Where each place's weather is in the current layout, for taps. */
+    private val spots = ArrayList<Pair<RectF, Weather>>()
     /** Where the words are in the current layout, so Tama can keep off them. Rebuilt on every draw. */
     val textZones = ArrayList<RectF>()
     private val path = Path()
@@ -169,6 +174,7 @@ class DashboardView(context: Context) : View(context) {
             canvas.drawPath(moon, fill)
         }
         canvas.drawText(line, left + SKY_W, y, type(size, sans, color, alpha, shadow = shadow))
+        spots.add(RectF(left - 12f, y - size - 5f, if (spread) x + maxWidth else left + width + 12f, y + 9f) to place)
         if (spread) {
             val room = maxWidth - width - 24f
             canvas.drawText(fit(what, text, room), x + maxWidth, y, type(size, sans, color, alpha, align = Paint.Align.RIGHT, shadow = shadow))
@@ -211,6 +217,7 @@ class DashboardView(context: Context) : View(context) {
         studio.setEmpty()
         studio2.setEmpty()
         textZones.clear()
+        spots.clear()
         when (layout) {
             MATTED -> drawMatted(canvas, w, h)
             SPLIT -> drawSplit(canvas, w, h)
@@ -273,6 +280,7 @@ class DashboardView(context: Context) : View(context) {
             // Two zones, so the empty corner beside the temperature stays free.
             quiet(w - 200f, h - 162f - lift, w - 30f, h - 90f - lift)
             quiet(w - 72f - max(text.measureText(it.sentence), 280f), h - 90f - lift, w - 30f, h - 8f)
+            spots.add(RectF(w - 72f - max(text.measureText(it.sentence), 280f), h - 170f - lift, w, h - 36f - lift) to it)
         }
         if (awayA.isNotEmpty()) hairline(canvas, w - 52f - 260f, w - 52f, h - 50f - (awayA.size - 1) * AWAY_STEP, WHITE, 0.45f)
         awayA.forEachIndexed { i, place ->
@@ -320,6 +328,7 @@ class DashboardView(context: Context) : View(context) {
             canvas.drawText(fit(it.detail, type(17f, sans, art.paper, 0.72f), right - x), x, 378f, text)
             rule(canvas, x, right, 402f)
             sectionEnd = 402f
+            spots.add(RectF(x - 16f, 296f, w, 402f) to it)
             // As many other places as fit above the projects; always at least one.
             val room = ((736f - projects.size * 62f - 30f - 34f - 431f) / AWAY_STEP).toInt() + 1
             val shown = away.take(room.coerceIn(1, 4))
@@ -364,6 +373,7 @@ class DashboardView(context: Context) : View(context) {
         canvas.drawText(shortDate.format(now).uppercase(), x, 438f, mono(art.paper, 0.7f, 16f))
         weather?.let {
             canvas.drawText(fit("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", type(23f, bold, art.paper), right - x), x, 480f, text)
+            spots.add(RectF(split, 450f, w, 492f) to it)
             // Above four projects there is room for one more line; with fewer, for more places.
             val room = ((h - 40f - projects.size * 58f - 16f - 514f) / AWAY_STEP).toInt() + 1
             val shown = away.take(room.coerceIn(1, 4))
@@ -468,6 +478,7 @@ class DashboardView(context: Context) : View(context) {
         canvas.drawText(clock.format(now), w / 2, 320f, type(290f, thin, WHITE, spacing = -0.03f, align = Paint.Align.CENTER, shadow = true))
         weather?.let {
             canvas.drawText("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", w / 2, 396f, type(32f, italic, WHITE, align = Paint.Align.CENTER, shadow = true))
+            spots.add(RectF(w / 2 - 390f, 352f, w / 2 + 390f, 412f) to it)
         }
         if (away.isNotEmpty()) hairline(canvas, w / 2 - 130f, w / 2 + 130f, 412f, WHITE, 0.5f)
         away.take(3).forEachIndexed { i, place ->
@@ -566,9 +577,11 @@ class DashboardView(context: Context) : View(context) {
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked != MotionEvent.ACTION_UP) return true
+        val spot = spots.firstOrNull { it.first.contains(event.x, event.y) }
         when {
             learnOpen -> learnOpen = false
             plaque.contains(event.x, event.y) -> learnOpen = true
+            spot != null -> onWeather?.invoke(spot.second, event.x, event.y)
             studio.contains(event.x, event.y) || studio2.contains(event.x, event.y) -> onProjects?.invoke()
             else -> {
                 layout += 1
