@@ -203,7 +203,7 @@ Add the hub to an MCP client as a remote (streamable HTTP) server at
 claude mcp add --transport http mado http://HUB_ADDRESS:7878/mcp
 ```
 
-Tools: `frame_notify`, `frame_companion`, `frame_project`, `frame_look`, `frame_state`. `frame_look` returns an
+Tools: `frame_notify`, `frame_companion`, `frame_project`, `frame_sleep`, `frame_wake`, `frame_look`, `frame_state`. `frame_look` returns an
 image of the frame's screen, which is how an agent checks its own work.
 
 ## Step 8 (optional): now playing from a Mac

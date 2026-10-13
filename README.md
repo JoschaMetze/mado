@@ -44,7 +44,13 @@ Tama, a small creature, lives on the glass above every scene. It wanders, amuses
 music, frets beside urgent alerts, and can be poked, carried and tilted. The rail has switches
 to hide it and to mute it.
 
-Planned: canvases that agents can draw on, night mode.
+At night the frame sleeps: a deep amber clock on black with the backlight turned right down,
+and Tama asleep. Whispers and nudges wait for the morning; urgent alerts still show. Touch it
+or knock twice on the desk and it comes back for a moment. The hours are set on the hub's
+page (23:00 to 07:00 unless you change them), the rail has a Sleep switch, and the glass also
+turns itself down between sunset and sunrise.
+
+Planned: canvases that agents can draw on.
 
 ## How it fits together
 
@@ -125,6 +131,7 @@ curl -X POST http://HOST:7878/api/notify \
 | HTTP | |
 |---|---|
 | `POST /api/notify` | `text`, optional `level` (`whisper`, `nudge`, `urgent`), `source`, `ttl_s` (urgent ignores it and stays until tapped) |
+| `POST /api/sleep`, `POST /api/wake` | Night mode from now, or day from now, until the frame's hours next change over. Optional `source` |
 | `POST /api/companion` | `action` (as for `frame_companion` below), optional `ttl_s` for a mood or hiding, `source` |
 | `POST /api/project` | `name`, `status` (`on_track`, `needs_you`, `blocked`, `done`, `archived`), optional `note`, `progress` 0 to 1, and `icon` (the URL of a PNG or JPEG, or the image in base64). Send the icon once: later reports keep it, and `""` removes it. |
 | `GET /api/look` | JPEG of what the frame is showing |
@@ -134,6 +141,7 @@ curl -X POST http://HOST:7878/api/notify \
 | MCP tool | |
 |---|---|
 | `frame_notify` | Show an alert |
+| `frame_sleep`, `frame_wake` | Put the frame into night mode, or end it |
 | `frame_companion` | Ask Tama for a gesture (`wave`, `nod`, `celebrate`), a mood (`happy`, `worried`, `calm`), to `hide`, or a hobby |
 | `frame_project` | Report where a project stands |
 | `frame_look` | Get a picture of the frame's screen, so an agent can see its own work |

@@ -25,7 +25,6 @@ import android.view.WindowManager
 import jp.co.xenocode.mado.TamaFace.Brows
 import jp.co.xenocode.mado.TamaFace.Eyes
 import jp.co.xenocode.mado.TamaFace.Mouth
-import java.util.Calendar
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -46,6 +45,12 @@ import kotlin.random.Random
 class TamaView(context: Context) : View(context), SensorEventListener {
     /** Off by default: the frame makes no sound unless the owner turns this on in the rail. */
     var sound = false
+    /** Whether it is night as the frame keeps it; then the only thing to do is sleep. */
+    var night: () -> Boolean = { false }
+    /** Two knocks close together: a signal to the frame itself, whether or not Tama is about. */
+    var onKnockTwice: (() -> Unit)? = null
+    private var lastRap = 0L
+    private var lastPair = 0L
 
     /** Where the scene underneath has words. Tama passes over them but does not settle there. */
     var keepOut: () -> List<RectF> = { emptyList() }
@@ -189,7 +194,6 @@ class TamaView(context: Context) : View(context), SensorEventListener {
     private var hobbyFor = 0L
     private var lastHobby: Hobby? = null
     private var nextHobbyAt = 0L
-    private val calendar = Calendar.getInstance()
     private var sadUntil = 0L
 
     // Pressing its face to the glass to look out.
@@ -470,6 +474,14 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         restX += (gravX - restX) * dt / REST_SETTLE_S
         restY += (gravY - restY) * dt / REST_SETTLE_S
 
+        // One knock rings for a moment, so the second only counts after a gap.
+        if (jolt > KNOCK && now - lastRap > RAP_GAP_MS && now - lastPair > RAP_REST_MS) {
+            if (now - lastRap < RAP_PAIR_MS) {
+                lastPair = now
+                onKnockTwice?.invoke()
+            }
+            lastRap = now
+        }
         if (jolt > KNOCK && now - lastKnock > KNOCK_COOLDOWN_MS && !held && visibility == VISIBLE) {
             lastKnock = now
             startle()
@@ -810,12 +822,6 @@ class TamaView(context: Context) : View(context), SensorEventListener {
                 pebblesFalling = false
             }
         }
-    }
-
-    private fun night(): Boolean {
-        calendar.timeInMillis = System.currentTimeMillis()
-        val hour = calendar.get(Calendar.HOUR_OF_DAY)
-        return hour >= NIGHT_FROM || hour < NIGHT_TO
     }
 
     private fun asleep() = hobby == Hobby.NAP && !going
@@ -1541,9 +1547,6 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         const val FIRST_HOBBY_MS = 40_000L
         const val HOBBY_GAP_MIN_MS = 60_000L
         const val HOBBY_GAP_MAX_MS = 180_000L
-        /** Hours of the day it sleeps through. */
-        const val NIGHT_FROM = 23
-        const val NIGHT_TO = 7
         const val PRINT_LIFE_MS = 15_000L
         /** A nap starts with a yawn this long. */
         const val YAWN_MS = 1_800L
@@ -1669,6 +1672,9 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         /** m/s² of sudden jolt that counts as a knock. */
         const val KNOCK = 3f
         const val KNOCK_COOLDOWN_MS = 1_500L
+        const val RAP_GAP_MS = 220L
+        const val RAP_PAIR_MS = 1_300L
+        const val RAP_REST_MS = 2_500L
         const val KNOCK_SHOW_S = 0.9f
         const val SECOND_TAP_MS = 230L
         const val POKE_WINDOW_MS = 8_000L

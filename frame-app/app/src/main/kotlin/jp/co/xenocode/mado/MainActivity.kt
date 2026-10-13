@@ -1,5 +1,6 @@
 package jp.co.xenocode.mado
 
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
@@ -8,6 +9,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Base64
 import android.view.MotionEvent
 import android.view.View
@@ -16,9 +18,12 @@ import android.widget.FrameLayout
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.concurrent.thread
+import kotlin.math.max
+import kotlin.math.min
 
 class MainActivity : Activity(), HubLink.Listener {
     private lateinit var root: FrameLayout
@@ -32,6 +37,25 @@ class MainActivity : Activity(), HubLink.Listener {
     private lateinit var dashboard: DashboardView
     private lateinit var projectsPage: ProjectsView
     private lateinit var weatherPage: WeatherView
+    private lateinit var nightView: NightView
+    private val night = NightClock()
+    /** Night mode is in force; `asleep` is that and nothing keeping the frame up for the moment. */
+    private var nightOn = false
+    private var asleep = false
+    private var peekUntil = 0L
+    private var urgentShown = false
+    private var hubHearsNight = false
+    private var shownBrightness = -1f
+    private var brightnessAnimator: ValueAnimator? = null
+    /** Whispers and nudges that came in the night, kept for the morning. */
+    private val held = ArrayList<AlertView.Alert>()
+    private val nightWatch = object : Runnable {
+        override fun run() {
+            updateNight()
+            root.postDelayed(this, NIGHT_CHECK_MS)
+        }
+    }
+    private val peekOver = Runnable { updateNight() }
     private var projectList: List<DashboardView.Project> = emptyList()
     /** Project icons by the hub's name for them; a new picture has a new name. */
     private val projectIcons = HashMap<String, Bitmap>()
@@ -64,9 +88,16 @@ class MainActivity : Activity(), HubLink.Listener {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         alerts = AlertView(this).apply {
-            onPresented = { tama.alert(it.level) }
+            onPresented = {
+                tama.alert(it.level)
+                // Urgent gets through at night: the frame stays up for as long as it is showing.
+                urgentShown = it.level == "urgent"
+                updateNight()
+            }
             onDismissed = { alert, reason ->
                 tama.alertGone()
+                urgentShown = false
+                updateNight()
                 link?.send(JSONObject().put("t", "event").put("kind", "dismissed").put("id", alert.id).put("reason", reason))
             }
         }
@@ -95,10 +126,12 @@ class MainActivity : Activity(), HubLink.Listener {
             visibility = if (prefs().getBoolean("tama", true)) View.VISIBLE else View.GONE
             sound = prefs().getBoolean("tama_sound", false)
             onDoing = ::reportTama
+            night = { nightOn }
+            onKnockTwice = ::peek
             keepOut = {
                 tamaZones.clear()
                 tamaZones.addAll(
-                    if (weatherPage.isOpen) weatherPage.textZones else if (scene == DASHBOARD) dashboard.textZones else nowPlaying.textZones
+                    if (asleep) nightView.textZones else if (weatherPage.isOpen) weatherPage.textZones else if (scene == DASHBOARD) dashboard.textZones else nowPlaying.textZones
                 )
                 if (!alerts.zone.isEmpty) tamaZones.add(alerts.zone)
                 tamaZones
@@ -108,6 +141,7 @@ class MainActivity : Activity(), HubLink.Listener {
         rail = RailView(this).apply {
             tamaShown = tama.visibility == View.VISIBLE
             tamaSound = tama.sound
+            onSleep = { sleep(it) }
             onTama = {
                 tama.visibility = if (it) View.VISIBLE else View.GONE
                 // A hidden Tama draws nothing, so it cannot say so itself.
@@ -125,16 +159,20 @@ class MainActivity : Activity(), HubLink.Listener {
                 markRail()
             }
             brightness = prefs().getFloat("brightness", 1f)
-            onBrightness = ::setBrightness
+            onBrightness = {
+                prefs().edit().putFloat("brightness", it).apply()
+                applyBrightness(false)
+            }
             // The frame has no Home key, so the rail is the way out to the launcher.
             onHome = ::leaveToLauncher
         }
         markRail()
-        setBrightness(rail.brightness)
+        nightView = NightView(this).apply { onWake = ::peek }
         root = FrameLayout(this).apply {
             scenes.forEach(::addView)
             addView(projectsPage)
             addView(weatherPage)
+            addView(nightView)
             addView(tama)
             addView(alerts)
             addView(rail)
@@ -145,6 +183,8 @@ class MainActivity : Activity(), HubLink.Listener {
         root.postDelayed(dayWatch, 60_000)
         weatherSource = WeatherSource(this)
         weatherWatch.run()
+        readNightHours()
+        nightWatch.run()
     }
 
     // `am start ... --es hub ws://host:7878/frame` points the frame at a hub; it is remembered.
@@ -163,6 +203,8 @@ class MainActivity : Activity(), HubLink.Listener {
                 tama.pinFace(it.getOrElse(0) { "" }, it.getOrElse(1) { "" }, it.getOrElse(2) { "" }, it.getOrNull(3) == "tear")
             }
             if (intent.hasExtra("tama_music")) tama.music = intent.getBooleanExtra("tama_music", false)
+            // `--es night on` (or off) is the rail's Sleep switch.
+            intent.getStringExtra("night")?.let { sleep(it == "on") }
             // The weather page under another sky: `--es weather storm --ez weather_night true`
             // (`--es weather real` for the one outside). The number picks the place's tab.
             intent.getStringExtra("weather")?.let { wanted ->
@@ -209,9 +251,106 @@ class MainActivity : Activity(), HubLink.Listener {
         startActivity(target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    private fun setBrightness(value: Float) {
+    private fun minuteOfDay(): Int {
+        val now = Calendar.getInstance()
+        return now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+    }
+
+    // The hours come from the hub's config; the saved copy keeps the nights when the hub is away.
+    private fun readNightHours() {
+        val hours = try {
+            JSONObject(prefs().getString("config", null) ?: "{}").optJSONObject("night")
+        } catch (e: Exception) {
+            null
+        }
+        night.from = NightClock.minutes(hours?.optString("from") ?: "") ?: 23 * 60
+        night.to = NightClock.minutes(hours?.optString("to") ?: "") ?: 7 * 60
+        night.enabled = hours?.optBoolean("off") != true
+    }
+
+    /** The rail's switch and the hub's sleep and wake: night mode from now, or day from now. */
+    private fun sleep(on: Boolean) {
+        night.force(on, minuteOfDay())
+        peekUntil = 0L
+        updateNight()
+    }
+
+    /** A touch or two knocks in the night: the frame comes back for a while, turned down low. */
+    private fun peek() {
+        if (!nightOn) return
+        peekUntil = SystemClock.uptimeMillis() + PEEK_MS
+        root.removeCallbacks(peekOver)
+        root.postDelayed(peekOver, PEEK_MS + 100)
+        updateNight()
+    }
+
+    /**
+     * Brings the glass in line with the hour. Asleep it shows only the night clock; music
+     * playing, an urgent alert or a peek keeps it up, still turned down.
+     */
+    private fun updateNight() {
+        val on = night.asleep(minuteOfDay())
+        if (on != nightOn) {
+            nightOn = on
+            rail.asleep = on
+            reportNight()
+            if (!on) {
+                // Morning: what waited through the night is said now.
+                held.forEach(alerts::show)
+                held.clear()
+                nightView.waiting = 0
+            }
+        }
+        val sleeping = on && SystemClock.uptimeMillis() >= peekUntil && !urgentShown && playState != "playing"
+        if (sleeping != asleep) {
+            asleep = sleeping
+            nightView.animate().cancel()
+            tama.animate().cancel()
+            if (sleeping) {
+                projectsPage.close()
+                weatherPage.close()
+                nightView.visibility = View.VISIBLE
+                nightView.animate().alpha(1f).setDuration(NIGHT_FADE_MS).withLayer()
+                // Tama sleeps on, but not as a bright spot in a dark room.
+                tama.animate().alpha(TAMA_NIGHT_ALPHA).setDuration(NIGHT_FADE_MS)
+            } else {
+                nightView.animate().alpha(0f).setDuration(WAKE_FADE_MS).withLayer().withEndAction { nightView.visibility = View.GONE }
+                tama.animate().alpha(1f).setDuration(WAKE_FADE_MS)
+            }
+            applyBrightness(true)
+        } else {
+            applyBrightness(false)
+        }
+    }
+
+    private fun reportNight() {
+        if (hubHearsNight) link?.send(JSONObject().put("t", "event").put("kind", "night").put("asleep", nightOn))
+    }
+
+    /** The owner's brightness, turned down after sunset, lower for a peek, and to almost nothing asleep. */
+    private fun applyBrightness(eased: Boolean) {
+        val outlook = here?.outlook
+        val want = when {
+            asleep -> NIGHT_BRIGHTNESS
+            nightOn -> min(rail.brightness, PEEK_BRIGHTNESS)
+            else -> max(RailView.MIN_BRIGHTNESS, rail.brightness * Evening.dim(minuteOfDay(), outlook?.sunriseMin ?: -1, outlook?.sunsetMin ?: -1))
+        }
+        if (want == shownBrightness) return
+        brightnessAnimator?.cancel()
+        if (!eased || shownBrightness < 0f) {
+            setWindowBrightness(want)
+            return
+        }
+        brightnessAnimator = ValueAnimator.ofFloat(shownBrightness, want).apply {
+            duration = if (asleep) NIGHT_FADE_MS else WAKE_FADE_MS
+            addUpdateListener { setWindowBrightness(it.animatedValue as Float) }
+            start()
+        }
+    }
+
+    private fun setWindowBrightness(value: Float) {
+        shownBrightness = value
         window.attributes = window.attributes.apply { screenBrightness = value }
-        prefs().edit().putFloat("brightness", value).apply()
     }
 
     private fun connect() {
@@ -236,6 +375,7 @@ class MainActivity : Activity(), HubLink.Listener {
         if (!up) tama.music = false
         if (prefs().getString("hub", null) != null) tama.hubLink(up)
         if (!up) hubHearsTama = false
+        if (!up) hubHearsNight = false
         rail.linkUp = up
         if (up) {
             paintingDay = ""
@@ -262,6 +402,7 @@ class MainActivity : Activity(), HubLink.Listener {
         here?.let { p -> weatherSource.fetch(p.optString("name"), p.optDouble("lat"), p.optDouble("lon")) {
             if (it != null) {
                 this.here = it
+                applyBrightness(false)
                 dashboard.setWeather(it)
                 tama.setWeather(it)
                 weatherPage.setPlaces(weatherPlaces())
@@ -383,32 +524,44 @@ class MainActivity : Activity(), HubLink.Listener {
     override fun onHubMessage(msg: JSONObject) {
         when (msg.optString("t")) {
             "notify" -> {
-                tama.notice()
-                alerts.show(
-                    AlertView.Alert(
-                        id = msg.optLong("id"),
-                        level = msg.optString("level", "nudge"),
-                        text = msg.optString("text"),
-                        source = if (msg.isNull("source")) null else msg.optString("source"),
-                        ttlMs = msg.optLong("ttl_s") * 1000,
-                    )
+                val alert = AlertView.Alert(
+                    id = msg.optLong("id"),
+                    level = msg.optString("level", "nudge"),
+                    text = msg.optString("text"),
+                    source = if (msg.isNull("source")) null else msg.optString("source"),
+                    ttlMs = msg.optLong("ttl_s") * 1000,
                 )
+                // At night only urgent is shown; the rest waits for the morning, the newest few of it.
+                if (nightOn && alert.level != "urgent") {
+                    if (held.size == MAX_HELD) held.removeAt(0)
+                    held.add(alert)
+                    nightView.waiting = held.size
+                    link?.send(JSONObject().put("t", "event").put("kind", "held").put("id", alert.id))
+                } else {
+                    tama.notice()
+                    alerts.show(alert)
+                }
             }
+            "night" -> sleep(msg.optBoolean("asleep"))
             "now_playing" -> nowPlaying(msg)
             // Only a hub that says it follows Tama is told what Tama is up to; an older one
             // would write every change into its log.
             "hub" -> {
                 hubHearsTama = msg.optBoolean("tama")
                 reportTama(tama.doingNow())
+                hubHearsNight = msg.optBoolean("night")
+                reportNight()
             }
             "companion" -> tama.act(msg.optString("action"), msg.optLong("ttl_s") * 1000)
             "art" -> painting(msg)
             "projects" -> projects(msg)
             "look" -> look(msg.optLong("req"))
-            // Kept for the scenes that will use it (weather places); nothing reads it yet.
+            // Saved, so the places and the night's hours are still known with the hub away.
             "config" -> {
                 prefs().edit().putString("config", msg.optJSONObject("config")?.toString()).apply()
                 refreshWeather()
+                readNightHours()
+                updateNight()
             }
         }
     }
@@ -486,6 +639,7 @@ class MainActivity : Activity(), HubLink.Listener {
             playState = state
             if (playing) showScene(NOW_PLAYING)
             lingerOnNowPlaying()
+            updateNight()
         }
     }
 
@@ -530,6 +684,8 @@ class MainActivity : Activity(), HubLink.Listener {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         tama.watch(event)
+        // Each touch during a peek keeps the frame up a while longer.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && nightOn && !asleep) peek()
         return super.dispatchTouchEvent(event)
     }
 
@@ -563,5 +719,13 @@ class MainActivity : Activity(), HubLink.Listener {
         const val WEATHER_EVERY_MS = 20 * 60_000L
         const val PAUSED_LINGER_MS = 120_000L
         const val STOPPED_LINGER_MS = 10_000L
+        const val NIGHT_CHECK_MS = 15_000L
+        const val NIGHT_FADE_MS = 2_500L
+        const val WAKE_FADE_MS = 600L
+        const val PEEK_MS = 45_000L
+        const val NIGHT_BRIGHTNESS = 0.01f
+        const val PEEK_BRIGHTNESS = 0.25f
+        const val TAMA_NIGHT_ALPHA = 0.3f
+        const val MAX_HELD = 8
     }
 }

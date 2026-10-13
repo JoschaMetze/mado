@@ -28,6 +28,13 @@ class RailView(context: Context) : View(context) {
     var onOpening: (() -> Unit)? = null
     var onTama: ((Boolean) -> Unit)? = null
     var onTamaSound: ((Boolean) -> Unit)? = null
+    var onSleep: ((Boolean) -> Unit)? = null
+    /** Night mode is on, by the hours or because someone asked. */
+    var asleep = false
+        set(value) {
+            field = value
+            invalidate()
+        }
     var tamaShown = true
     var tamaSound = false
 
@@ -127,7 +134,7 @@ class RailView(context: Context) : View(context) {
         }
         label.alpha = 255
         val sliderY = sliderY()
-        val homeY = sliderY + 50f
+        val homeY = sliderY + 34f
 
         canvas.drawText("BRIGHTNESS", PAD, sliderY - 28f, small)
         val knob = PAD + (W - 2 * PAD) * (brightness - MIN_BRIGHTNESS) / (1f - MIN_BRIGHTNESS)
@@ -143,9 +150,10 @@ class RailView(context: Context) : View(context) {
         canvas.drawRoundRect(rect, 4f, 4f, stroke)
         canvas.drawText("Home screen", PAD + 32f, homeY + ROW_H / 2 + 8f, label)
 
-        drawSwitch(canvas, "Tama", homeY + ROW_STEP, tamaShown, 255)
+        drawSwitch(canvas, "Sleep", homeY + LOW_STEP, asleep, 255)
+        drawSwitch(canvas, "Tama", homeY + 2 * LOW_STEP, tamaShown, 255)
         // Sound has nothing to make it while Tama is hidden.
-        drawSwitch(canvas, "Tama sounds", homeY + 2 * ROW_STEP, tamaSound && tamaShown, if (tamaShown) 255 else 90)
+        drawSwitch(canvas, "Tama sounds", homeY + 3 * LOW_STEP, tamaSound && tamaShown, if (tamaShown) 255 else 90)
 
         fill.color = if (linkUp) 0xFF4FD19C.toInt() else 0xFFFF7B7B.toInt()
         canvas.drawCircle(PAD + 5f, h - 58f, 5f, fill)
@@ -221,24 +229,28 @@ class RailView(context: Context) : View(context) {
         return true
     }
 
-    private fun sliderY() = SCENE_Y + scenes.size * ROW_STEP + 78f
+    private fun sliderY() = SCENE_Y + scenes.size * ROW_STEP + 60f
 
     private fun press(lifted: Boolean) {
-        val homeY = sliderY() + 50f
+        val homeY = sliderY() + 34f
         val scene = ((downY - SCENE_Y) / ROW_STEP).toInt()
         when {
             !lifted -> settle(true)
-            downY in homeY..homeY + ROW_H -> {
+            downY in homeY..homeY + LOW_STEP -> {
                 settle(false)
                 onHome?.invoke()
             }
-            downY in homeY + ROW_STEP..homeY + ROW_STEP + ROW_H -> {
+            downY in homeY + LOW_STEP..homeY + LOW_STEP + LOW_STEP -> {
+                settle(false)
+                onSleep?.invoke(!asleep)
+            }
+            downY in homeY + 2 * LOW_STEP..homeY + 2 * LOW_STEP + LOW_STEP -> {
                 tamaShown = !tamaShown
                 onTama?.invoke(tamaShown)
                 settle(true)
                 invalidate()
             }
-            tamaShown && downY in homeY + 2 * ROW_STEP..homeY + 2 * ROW_STEP + ROW_H -> {
+            tamaShown && downY in homeY + 3 * LOW_STEP..homeY + 3 * LOW_STEP + LOW_STEP -> {
                 tamaSound = !tamaSound
                 onTamaSound?.invoke(tamaSound)
                 settle(true)
@@ -267,6 +279,8 @@ class RailView(context: Context) : View(context) {
         private const val TAP_SLOP = 14f
         private const val ROW_H = 60f
         private const val ROW_STEP = ROW_H + 6f
+        /** The switches under the slider sit closer together than the scenes, to leave the hub its corner. */
+        private const val LOW_STEP = 56f
         private const val SCENE_Y = 96f
         private const val AUTO_HIDE_MS = 6_000L
         private const val FG = 0xFFFFFFFF.toInt()

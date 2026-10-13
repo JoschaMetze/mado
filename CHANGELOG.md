@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Night mode. During its night hours the frame shows only a deep amber clock on black, with
+  the backlight at its lowest and Tama asleep. Whispers and nudges that arrive are kept and
+  shown in the morning; urgent alerts show at once. A touch or two knocks wakes it for 45
+  seconds, and music playing keeps it up. The hours (23:00 to 07:00 to begin with) are set on
+  the hub's page and kept by the frame, so nights work with the hub down. The rail has a
+  Sleep switch, and `frame_sleep`, `frame_wake`, `POST /api/sleep` and `POST /api/wake` do the
+  same from outside; `frame_state` says whether the frame is asleep.
+- The glass turns itself down to 60% of the chosen brightness between sunset and sunrise.
 - The now-playing scene has a "Close" in its top right corner, like the weather and projects
   pages, and the rail lists those two pages beside the scenes.
 - Tama, the frame's companion: a small creature on the far side of the glass. It wanders

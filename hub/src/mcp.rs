@@ -66,6 +66,7 @@ fn tools() -> Value {
             "description": "Show a short message on the Mado frame as a liquid alert. \
                 whisper: a small bead at the edge, no text shown until tapped. \
                 nudge: one line that leaves by itself. \
+                While the frame sleeps at night, whispers and nudges wait for its morning. \
                 urgent: covers a third of the screen until the owner dismisses it.",
             "inputSchema": {
                 "type": "object",
@@ -114,13 +115,32 @@ fn tools() -> Value {
             }
         },
         {
+            "name": "frame_sleep",
+            "description": "Put the frame into night mode now: a dim amber clock on black, with whispers and nudges kept \
+                until it wakes. It sleeps by itself during its night hours; this is for outside them. \
+                It lasts until the frame's next morning, or until someone touches or wakes it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "source": { "type": "string", "description": "Who is asking, for the hub's log." } }
+            }
+        },
+        {
+            "name": "frame_wake",
+            "description": "End night mode now, until the frame's next night. Think twice in the small hours: \
+                the frame is in someone's home, and an urgent alert already shows through night mode by itself.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "source": { "type": "string", "description": "Who is asking, for the hub's log." } }
+            }
+        },
+        {
             "name": "frame_look",
             "description": "Return a picture of what the frame is showing right now (1280x800 JPEG).",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "frame_state",
-            "description": "Return which frames are connected, what Tama is doing, the hub's config and recent activity.",
+            "description": "Return which frames are connected, what Tama is doing, whether the frame is asleep, the hub's config and recent activity.",
             "inputSchema": { "type": "object", "properties": {} }
         }
     ])
@@ -141,6 +161,8 @@ async fn call(hub: &Shared, params: &Value) -> Value {
             .map_err(|e| e.to_string())
             .and_then(|c| hub.companion(c))
             .map(text),
+        "frame_sleep" => hub.sleep(true, args["source"].as_str()).map(text),
+        "frame_wake" => hub.sleep(false, args["source"].as_str()).map(text),
         "frame_look" => hub.look().await.map(|jpeg| {
             json!({ "type": "image", "mimeType": "image/jpeg",
                     "data": base64::engine::general_purpose::STANDARD.encode(jpeg) })

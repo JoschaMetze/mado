@@ -12,7 +12,7 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{art, projects, Notify, Place, Shared};
+use crate::{art, projects, Night, Notify, Place, Shared};
 
 const STYLE: &str = include_str!("ui.css");
 /// How often the picture of the glass reloads itself. Each reload asks the frame for a screenshot.
@@ -425,10 +425,27 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
         }
     };
 
-    let (places, theme) = {
+    let (places, theme, night) = {
         let config = hub.config.read().unwrap();
         let theme = THEMES.iter().find(|t| t.0 == config.theme).unwrap_or(&THEMES[0]).0;
-        (place_rows(&config.places), theme)
+        (place_rows(&config.places), theme, config.night.clone())
+    };
+    let night_off = if night.off { " checked" } else { "" };
+    let (night_from, night_to) = (esc(&night.from), esc(&night.to));
+    // What the frame last said, so the button offers the other thing.
+    let (night_now, night_button) = match *hub.asleep.lock().unwrap() {
+        Some(true) => (
+            "The frame is asleep.",
+            r#"<button name="asleep" value="false" class="quiet">Wake it now</button>"#,
+        ),
+        Some(false) => (
+            "The frame is awake.",
+            r#"<button name="asleep" value="true" class="quiet">Sleep now</button>"#,
+        ),
+        None => (
+            "",
+            r#"<button name="asleep" value="true" class="quiet">Sleep now</button> <button name="asleep" value="false" class="quiet">Wake now</button>"#,
+        ),
     };
     let themes: String = THEMES
         .iter()
@@ -540,6 +557,16 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
       <button>Add place</button>
     </form></details>
     <p class="muted small">"Here" gets the full forecast on the dashboard; the others get a line each with their local time. The frame fetches the weather itself.</p>
+  </section>
+  <section id="night"><div class="head"><p class="eyebrow">After dark</p><h2>Night</h2></div>
+    <form method="post" action="/ui/night">
+      <div class="row"><label>Sleeps from<input name="from" type="time" value="{night_from}" required></label>
+      <label>Wakes at<input name="to" type="time" value="{night_to}" required></label></div>
+      <label class="check"><input type="checkbox" name="off"{night_off}> Stay awake all night</label>
+      <button>Save hours</button>
+    </form>
+    <form method="post" action="/ui/sleep"><p>{night_now} {night_button}</p></form>
+    <p class="muted small">Asleep, the frame shows a dim amber clock and keeps whispers and nudges for the morning; urgent alerts still show. A touch or two knocks wakes it for a moment. It also turns itself down between sunset and sunrise.</p>
   </section>
   <section id="recent"><div class="head"><p class="eyebrow">Since the hub started</p><h2>Recent</h2></div>
     {log}
@@ -723,6 +750,42 @@ pub async fn theme(State(hub): State<Shared>, Form(Theme { theme }): Form<Theme>
         hub.log(format!("could not save config: {e}"));
     }
     Redirect::to("/")
+}
+
+#[derive(Deserialize)]
+pub struct NightForm {
+    from: String,
+    to: String,
+    off: Option<String>,
+}
+
+pub async fn night(State(hub): State<Shared>, Form(f): Form<NightForm>) -> Redirect {
+    if !Night::is_time(&f.from) || !Night::is_time(&f.to) {
+        return back("night", Err("Those hours need to be times of day, like 23:00.".into()));
+    }
+    hub.config.write().unwrap().night = Night {
+        from: f.from,
+        to: f.to,
+        off: f.off.is_some(),
+    };
+    match hub.config_changed() {
+        Ok(()) => back("night", Ok("Night hours saved.")),
+        Err(e) => back("night", Err(format!("Changed, but not saved to disk: {e}"))),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SleepForm {
+    asleep: bool,
+}
+
+pub async fn sleep(State(hub): State<Shared>, Form(SleepForm { asleep }): Form<SleepForm>) -> Redirect {
+    let done = if asleep {
+        "Asked the frame to sleep."
+    } else {
+        "Asked the frame to wake."
+    };
+    back("night", hub.sleep(asleep, Some("the hub page")).map(|_| done))
 }
 
 pub async fn place_add(State(hub): State<Shared>, Form(place): Form<Place>) -> Redirect {

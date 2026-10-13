@@ -53,6 +53,37 @@ pub struct Config {
     /// Which paintings the art of the day is chosen from.
     #[serde(default, skip_serializing_if = "art::Prefs::is_any")]
     pub art: art::Prefs,
+    /// When the frame sleeps. The frame keeps these hours itself, hub or no hub.
+    #[serde(default)]
+    pub night: Night,
+}
+
+/// The hours the frame shows only its night clock, as "HH:MM" on the frame's own clock.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct Night {
+    pub from: String,
+    pub to: String,
+    /// Set to keep the frame awake all night; it can still be told to sleep.
+    #[serde(default)]
+    pub off: bool,
+}
+
+impl Default for Night {
+    fn default() -> Self {
+        Night {
+            from: "23:00".into(),
+            to: "07:00".into(),
+            off: false,
+        }
+    }
+}
+
+impl Night {
+    /// A time of day as the frame reads it: two digits, a colon, two digits.
+    pub fn is_time(s: &str) -> bool {
+        let digits = |part: &str, most: u32| part.len() == 2 && part.parse::<u32>().is_ok_and(|n| n <= most);
+        matches!(s.split_once(':'), Some((h, m)) if digits(h, 23) && digits(m, 59))
+    }
 }
 
 /// A place the frame shows weather for. The frame fetches the forecast itself.
@@ -122,6 +153,8 @@ pub struct Hub {
     pub projects: Mutex<Vec<projects::Project>>,
     /// What Tama was last seen doing, as the frame reported it.
     pub tama: Mutex<Option<String>>,
+    /// Whether the frame said it is in night mode; None until one has said.
+    pub asleep: Mutex<Option<bool>>,
     pub data_dir: PathBuf,
     looks: Mutex<HashMap<u64, oneshot::Sender<String>>>,
     next_id: AtomicU64,
@@ -149,6 +182,7 @@ impl Hub {
             art_busy: AtomicBool::new(false),
             projects: Mutex::new(projects),
             tama: Mutex::default(),
+            asleep: Mutex::default(),
             data_dir,
             looks: Mutex::default(),
             next_id: AtomicU64::new(1),
@@ -235,6 +269,24 @@ impl Hub {
         Ok(json!({ "action": action, "sent_to_frames": frames, "tama_was": *self.tama.lock().unwrap() }))
     }
 
+    /// Night mode from now, or day from now. It holds until the frame's own hours next change over.
+    pub fn sleep(&self, asleep: bool, source: Option<&str>) -> Result<Value, String> {
+        let frames = self.send_all(&json!({ "t": "night", "asleep": asleep }));
+        let source = source.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("someone");
+        self.log(format!(
+            "{source} {}",
+            if asleep {
+                "put the frame to sleep"
+            } else {
+                "woke the frame"
+            }
+        ));
+        if frames == 0 {
+            return Err("no frame is connected, so nothing changed".into());
+        }
+        Ok(json!({ "asleep": asleep, "sent_to_frames": frames }))
+    }
+
     /// Ask the first connected frame for a JPEG of what is on its screen.
     pub async fn look(&self) -> Result<Vec<u8>, String> {
         let req = self.id();
@@ -275,8 +327,9 @@ impl Hub {
         let art = self.art.lock().unwrap().as_ref().map(|a| a.message());
         let projects = self.projects_message()["items"].take();
         let tama = self.tama.lock().unwrap().clone();
+        let asleep = *self.asleep.lock().unwrap();
         json!({
-            "frames": frames, "tama": tama, "now_playing": now_playing, "art": art, "projects": projects,
+            "frames": frames, "tama": tama, "asleep": asleep, "now_playing": now_playing, "art": art, "projects": projects,
             "config": *self.config.read().unwrap(), "recent": recent,
         })
     }
@@ -304,6 +357,9 @@ impl Hub {
             Some("event") if msg["kind"] == "tama" => {
                 *self.tama.lock().unwrap() = msg["doing"].as_str().map(str::to_owned);
             }
+            Some("event") if msg["kind"] == "night" => {
+                *self.asleep.lock().unwrap() = msg["asleep"].as_bool();
+            }
             Some("event") => self.log(format!(
                 "frame #{id}: {} {}",
                 msg["kind"].as_str().unwrap_or("event"),
@@ -324,7 +380,8 @@ async fn frame_session(socket: WebSocket, hub: Shared) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     // Says what this hub understands, so a newer frame does not send an older hub things it would only log.
-    let _ = tx.send(json!({ "t": "hub", "version": env!("CARGO_PKG_VERSION"), "tama": true }).to_string());
+    let _ =
+        tx.send(json!({ "t": "hub", "version": env!("CARGO_PKG_VERSION"), "tama": true, "night": true }).to_string());
     let _ = tx.send(json!({ "t": "config", "config": *hub.config.read().unwrap() }).to_string());
     let _ = tx.send(hub.now_playing.lock().unwrap().message().to_string());
     let _ = tx.send(hub.projects_message().to_string());
@@ -367,6 +424,7 @@ async fn frame_session(socket: WebSocket, hub: Shared) {
     frames.remove(&id);
     if frames.is_empty() {
         *hub.tama.lock().unwrap() = None;
+        *hub.asleep.lock().unwrap() = None;
     }
     drop(frames);
     hub.log(format!("frame #{id} disconnected"));
@@ -384,6 +442,27 @@ async fn api_companion(State(hub): State<Shared>, Json(c): Json<Companion>) -> R
         Ok(v) => Json(v).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
     }
+}
+
+/// Who is asking, for the log. The body may be left out altogether.
+#[derive(Default, Deserialize)]
+pub struct Asker {
+    pub source: Option<String>,
+}
+
+fn slept(outcome: Result<Value, String>) -> Response {
+    match outcome {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+async fn api_sleep(State(hub): State<Shared>, asker: Option<Json<Asker>>) -> Response {
+    slept(hub.sleep(true, asker.unwrap_or_default().source.as_deref()))
+}
+
+async fn api_wake(State(hub): State<Shared>, asker: Option<Json<Asker>>) -> Response {
+    slept(hub.sleep(false, asker.unwrap_or_default().source.as_deref()))
 }
 
 async fn api_state(State(hub): State<Shared>) -> Json<Value> {
@@ -430,8 +509,12 @@ async fn main() {
         .route("/ui/art/another", post(ui::art_another))
         .route("/ui/art/prefs", post(ui::art_prefs))
         .route("/ui/theme", post(ui::theme))
+        .route("/ui/night", post(ui::night))
+        .route("/ui/sleep", post(ui::sleep))
         .route("/api/notify", post(api_notify))
         .route("/api/companion", post(api_companion))
+        .route("/api/sleep", post(api_sleep))
+        .route("/api/wake", post(api_wake))
         .route("/api/state", get(api_state))
         .route("/api/look", get(api_look))
         .route(
@@ -525,6 +608,19 @@ mod tests {
         assert!(hub.companion(ask("dance")).unwrap_err().contains("action must be"));
         assert!(hub.companion(ask("wave")).unwrap_err().contains("no frame"));
         assert_eq!(hub.state()["tama"], Value::Null);
+    }
+
+    #[test]
+    fn night_hours_are_times_of_day() {
+        assert!(Night::is_time("23:00") && Night::is_time("00:59"));
+        for bad in ["24:00", "7:00", "07:60", "0700", "", "ab:cd"] {
+            assert!(!Night::is_time(bad), "{bad}");
+        }
+        // A config saved before night mode gets the usual hours.
+        let old: Config = serde_json::from_str(r#"{"places":[]}"#).unwrap();
+        assert!(old.night == Night::default());
+        assert!(hub().sleep(true, None).unwrap_err().contains("no frame"));
+        assert_eq!(hub().state()["asleep"], Value::Null);
     }
 
     #[test]
