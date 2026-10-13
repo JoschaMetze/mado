@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- While a player has a track on, the dashboard names it on one small line by the date,
+  fainter when paused; tap the line for now playing. It goes when the player stops.
 - Now playing has buttons for previous, play or pause, and next under the progress bar, and
   they work the player on the Mac. Previous starts the track again, or goes to the one
   before when the track has only just begun. Mado for Mac reports back at once after a tap

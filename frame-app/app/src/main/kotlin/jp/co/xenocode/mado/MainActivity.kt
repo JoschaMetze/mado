@@ -155,6 +155,10 @@ class MainActivity : Activity(), HubLink.Listener {
             layout = prefs().getInt("dashboard_layout", DashboardView.FULL_BLEED)
             onLayoutChosen = { prefs().edit().putInt("dashboard_layout", it).apply() }
             onProjects = { projectsPage.open() }
+            onMusic = {
+                showScene(NOW_PLAYING)
+                lingerOnNowPlaying()
+            }
             onWeather = { place, x, y -> weatherPage.open(place, x, y) }
         }
         projectsPage = ProjectsView(this)
@@ -512,7 +516,10 @@ class MainActivity : Activity(), HubLink.Listener {
     override fun onHubLink(up: Boolean) {
         alerts.linkUp = up
         // With the hub gone nobody can say whether music is still playing.
-        if (!up) tama.music = false
+        if (!up) {
+            tama.music = false
+            dashboard.setMusic(null)
+        }
         if (prefs().getString("hub", null) != null) tama.hubLink(up)
         if (!up) hubHearsTama = false
         if (!up) hubHearsNight = false
@@ -785,6 +792,8 @@ class MainActivity : Activity(), HubLink.Listener {
         val state = msg.optString("state")
         val playing = state == "playing"
         tama.music = playing
+        val title = msg.optString("title")
+        dashboard.setMusic(if (state == "stopped" || title.isEmpty()) null else DashboardView.Music(title, msg.optString("artist"), playing))
         if (playing && msg.optString("title") != trackTitle) {
             trackTitle = msg.optString("title")
             tama.trackChanged(msg.optString("artist"))

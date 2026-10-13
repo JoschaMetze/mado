@@ -53,7 +53,12 @@ class DashboardView(context: Context) : View(context) {
         val ink: Int, val paper: Int, val wall: Int, val accent: Int, val swatches: IntArray,
     )
 
+    /** What a player has on, for the line by the date. */
+    data class Music(val title: String, val artist: String, val playing: Boolean)
+
     var onLayoutChosen: ((Int) -> Unit)? = null
+    /** The line about the music was tapped. */
+    var onMusic: (() -> Unit)? = null
     var onProjects: (() -> Unit)? = null
     /** A place's weather was tapped, at this point on the glass. */
     var onWeather: ((Weather, Float, Float) -> Unit)? = null
@@ -75,6 +80,7 @@ class DashboardView(context: Context) : View(context) {
     }
 
     private var away: List<Away> = emptyList()
+    private var music: Music? = null
     private var learnOpen = false
     private var learn = 0f
     private var learnTitle: StaticLayout? = null
@@ -109,6 +115,8 @@ class DashboardView(context: Context) : View(context) {
     /** Where the projects are in the current layout, for taps; the pigments layout has two groups. */
     private val studio = RectF()
     private val studio2 = RectF()
+    /** Where the line about the music is in the current layout, for taps. */
+    private val tune = RectF()
     /** Where each place's weather is in the current layout, for taps. */
     private val spots = ArrayList<Pair<RectF, Weather>>()
     /** Where the words are in the current layout, so Tama can keep off them. Rebuilt on every draw. */
@@ -159,6 +167,36 @@ class DashboardView(context: Context) : View(context) {
     fun setAway(places: List<Weather>) {
         away = places.map(::Away)
         invalidate()
+    }
+
+    /** The track a player has on, or null when none has one; it gets a line by the date. */
+    fun setMusic(music: Music?) {
+        if (music == this.music) return
+        this.music = music
+        invalidate()
+    }
+
+    /** The track on one line, led by a small note; fainter while it is paused. Tapping it opens now playing. */
+    private fun drawMusic(canvas: Canvas, x: Float, y: Float, maxWidth: Float, color: Int, alpha: Float, align: Paint.Align, shadow: Boolean) {
+        val on = music ?: return
+        val a = if (on.playing) alpha else alpha * 0.7f
+        val words = listOf(on.title, on.artist).filter { it.isNotEmpty() }.joinToString(" · ").uppercase()
+        val line = fit(words, mono(color, a, 14f, shadow = shadow), maxWidth - NOTE_W)
+        val width = text.measureText(line) + NOTE_W
+        val left = when (align) {
+            Paint.Align.RIGHT -> x - width
+            Paint.Align.CENTER -> x - width / 2
+            else -> x
+        }
+        fill.color = withAlpha(color, a)
+        line2.color = fill.color
+        canvas.drawCircle(left + 5f, y - 2f, 3.4f, fill)
+        canvas.drawLine(left + 7.8f, y - 2f, left + 7.8f, y - 13f, line2)
+        canvas.drawLine(left + 7.8f, y - 13f, left + 12.5f, y - 10f, line2)
+        canvas.drawText(line, left + NOTE_W, y, text)
+        // Taller than the words, for a finger.
+        tune.set(left - 16f, y - 30f, left + width + 16f, y + 16f)
+        quiet(left - 10f, y - 20f, left + width + 10f, y + 10f)
     }
 
     /** Another place on one line, led by a small sun or moon for whether it is day there. */
@@ -241,6 +279,7 @@ class DashboardView(context: Context) : View(context) {
         val h = height.toFloat()
         studio.setEmpty()
         studio2.setEmpty()
+        tune.setEmpty()
         textZones.clear()
         spots.clear()
         when (layout) {
@@ -298,8 +337,11 @@ class DashboardView(context: Context) : View(context) {
         val time = time()
         canvas.drawText(time, 40f, h - 44f, type(186f, thin, WHITE, spacing = -0.02f, shadow = true))
         val x = 40f + text.measureText(time) + 26f
-        canvas.drawText(day(weekday).uppercase(), x, h - 82f, mono(WHITE, shadow = true, size = 16f))
-        canvas.drawText(day(dayMonth).uppercase(), x, h - 56f, mono(WHITE, shadow = true, size = 16f))
+        // The date moves up a line to let the music in under it.
+        val up = if (music == null) 0f else 26f
+        canvas.drawText(day(weekday).uppercase(), x, h - 82f - up, mono(WHITE, shadow = true, size = 16f))
+        canvas.drawText(day(dayMonth).uppercase(), x, h - 56f - up, mono(WHITE, shadow = true, size = 16f))
+        drawMusic(canvas, x, h - 56f, 330f, WHITE, 0.9f, Paint.Align.LEFT, shadow = true)
         quiet(30f, h - 188f, x + 190f, h - 24f)
 
         val awayA = away.take(3)
@@ -351,6 +393,7 @@ class DashboardView(context: Context) : View(context) {
         text.getTextBounds(time, 0, time.length, bounds)
         val middle = x - 8f + (bounds.left + bounds.right) / 2f
         if (clockSet) canvas.drawText("${weekday.format(now)} · ${dayMonth.format(now)}".uppercase(), middle, 252f, mono(art.paper, 0.72f, 16f, Paint.Align.CENTER))
+        drawMusic(canvas, x, 277f, right - x, art.paper, 0.72f, Paint.Align.LEFT, shadow = false)
         rule(canvas, x, right, 290f)
         var sectionEnd = 290f
         weather?.let {
@@ -400,7 +443,9 @@ class DashboardView(context: Context) : View(context) {
         val right = w - 44f
         canvas.drawText(if (clockSet) hour.format(now) else "--", x - 10f, 206f, type(218f, heavy, art.accent, spacing = -0.05f))
         canvas.drawText(if (clockSet) minute.format(now) else "--", x - 10f, 392f, type(218f, heavy, art.paper, spacing = -0.05f))
-        canvas.drawText(day(shortDate).uppercase(), x, 438f, mono(art.paper, 0.7f, 16f))
+        val date = day(shortDate).uppercase()
+        canvas.drawText(date, x, 438f, mono(art.paper, 0.7f, 16f))
+        drawMusic(canvas, right, 438f, right - x - text.measureText(date) - 24f, art.paper, 0.7f, Paint.Align.RIGHT, shadow = false)
         weather?.let {
             canvas.drawText(fit("${it.tempC}° · ${it.sentence.replaceFirstChar(Char::lowercase)}", type(23f, bold, art.paper), right - x), x, 480f, text)
             spots.add(RectF(split, 450f, w, 492f) to it)
@@ -515,6 +560,7 @@ class DashboardView(context: Context) : View(context) {
             drawAway(canvas, place, w / 2, 440f + i * 30f, 19f, WHITE, 0.9f, Paint.Align.CENTER, true, 900f)
         }
         quiet(w / 2 - 390f, 80f, w / 2 + 390f, 420f + min(3, away.size) * 30f)
+        drawMusic(canvas, w / 2, 444f + min(3, away.size) * 30f, 700f, WHITE, 0.9f, Paint.Align.CENTER, shadow = true)
     }
 
     // --- shared pieces --------------------------------------------------------------------
@@ -633,6 +679,7 @@ class DashboardView(context: Context) : View(context) {
         when {
             learnOpen -> learnOpen = false
             plaque.contains(event.x, event.y) -> learnOpen = true
+            tune.contains(event.x, event.y) -> onMusic?.invoke()
             spot != null -> onWeather?.invoke(spot.second, event.x, event.y)
             studio.contains(event.x, event.y) || studio2.contains(event.x, event.y) -> onProjects?.invoke()
             else -> {
@@ -652,6 +699,7 @@ class DashboardView(context: Context) : View(context) {
         private const val LAYOUTS = 4
         private const val MAX_PROJECTS = 4
         private const val SKY_W = 22f
+        private const val NOTE_W = 22f
         private const val AWAY_STEP = 27f
         private const val LEARN_W = 564f
         private const val LEARN_TEXT_W = 460
