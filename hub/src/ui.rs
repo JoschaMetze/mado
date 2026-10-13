@@ -1,6 +1,9 @@
 //! The web interface: status, a test alert, and all configuration. Server-rendered, no script.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use axum::{
     extract::{Multipart, Query, State},
@@ -290,7 +293,23 @@ fn now_playing_card(np: &Value) -> String {
     )
 }
 
-/// The choices for which paintings the museum is asked for.
+/// A row of tick boxes, one per choice, named `{group}_{key}`.
+fn ticks<'a>(group: &str, choices: impl Iterator<Item = (&'a str, &'a str)>, ticked: &[String]) -> String {
+    choices
+        .map(|(key, label)| {
+            format!(
+                r#"<label class="check"><input type="checkbox" name="{group}_{key}" value="1"{}>{label}</label>"#,
+                if ticked.iter().any(|t| t == key) {
+                    " checked"
+                } else {
+                    ""
+                }
+            )
+        })
+        .collect()
+}
+
+/// The choices for which works the sources are asked for.
 fn taste_form(prefs: &art::Prefs, pool: Option<u64>) -> String {
     let options = |choices: &[(&str, &str, &[&str])], chosen: &str| -> String {
         choices
@@ -312,26 +331,33 @@ fn taste_form(prefs: &art::Prefs, pool: Option<u64>) -> String {
             )
         })
         .collect();
-    let avoid: String = art::AVOIDABLE
-        .iter()
-        .map(|(key, label, _)| {
-            format!(
-                r#"<label class="check"><input type="checkbox" name="avoid_{key}" value="1"{}>{label}</label>"#,
-                if prefs.avoid.iter().any(|a| a == key) {
-                    " checked"
-                } else {
-                    ""
-                }
-            )
-        })
-        .collect();
+    let avoid = ticks("avoid", art::AVOIDABLE.iter().map(|a| (a.0, a.1)), &prefs.avoid);
+    // No box ticked means the first of each, so that is what an untouched form shows.
+    let or_first = |chosen: &[String], first: &str| match chosen.is_empty() {
+        true => vec![first.to_owned()],
+        false => chosen.to_vec(),
+    };
+    let sources = ticks(
+        "source",
+        art::SOURCES.iter().copied(),
+        &or_first(&prefs.sources, art::SOURCES[0].0),
+    );
+    let kinds = ticks(
+        "kind",
+        art::KINDS.iter().map(|k| (k.0, k.1)),
+        &or_first(&prefs.kinds, art::KINDS[0].0),
+    );
+    let copyrighted = if prefs.copyrighted { " checked" } else { "" };
     let pool = match pool {
-        Some(n) => format!("Today's painting was chosen from {n} that fit."),
+        Some(n) => format!("Today's was chosen from {n} that fit."),
         None => String::new(),
     };
     format!(
         r#"<form class="taste wide" method="post" action="/ui/art/prefs">
 <div class="head"><p class="eyebrow">What to show</p></div>
+<div class="checks"><span class="muted small">From</span>{sources}</div>
+<div class="checks"><span class="muted small">Kinds</span>{kinds}</div>
+<div class="checks"><span class="muted small">Copyright</span><label class="check"><input type="checkbox" name="copyrighted" value="1"{copyrighted}>Art Institute works still in copyright too (smaller pictures; for a frame at home)</label></div>
 <div class="pick"><label>Period<select name="period">{periods}</select></label>
 <label>Subject<select name="subject">{subjects}</select></label></div>
 <div class="checks"><span class="muted small">Leave out</span>{avoid}</div>
@@ -693,29 +719,22 @@ pub async fn art_another(State(hub): State<Shared>) -> Redirect {
     }
 }
 
-#[derive(Deserialize)]
-pub struct Taste {
-    #[serde(default)]
-    period: String,
-    #[serde(default)]
-    subject: String,
-    avoid_religious: Option<String>,
-    avoid_nudes: Option<String>,
-    avoid_death: Option<String>,
-}
-
-/// Save what kinds of painting to show, then replace today's with one that fits.
-pub async fn art_prefs(State(hub): State<Shared>, Form(t): Form<Taste>) -> Redirect {
-    let avoid = [
-        ("religious", t.avoid_religious),
-        ("nudes", t.avoid_nudes),
-        ("death", t.avoid_death),
-    ]
-    .into_iter()
-    .filter(|(_, ticked)| ticked.is_some())
-    .map(|(key, _)| key.to_owned())
-    .collect();
-    let prefs = match art::Prefs::chosen(&t.period, &t.subject, avoid) {
+/// Save what kinds of work to show and from where, then replace today's with one that fits.
+pub async fn art_prefs(State(hub): State<Shared>, Form(t): Form<HashMap<String, String>>) -> Redirect {
+    // Tick boxes arrive as `{group}_{key}`, and only the ticked ones.
+    let ticked = |group: &str| -> Vec<String> {
+        let mut keys: Vec<String> = t
+            .keys()
+            .filter_map(|name| name.strip_prefix(group)?.strip_prefix('_'))
+            .map(str::to_owned)
+            .collect();
+        keys.sort();
+        keys
+    };
+    let field = |name: &str| t.get(name).map_or("", String::as_str);
+    let prefs = art::Prefs::chosen(field("period"), field("subject"), ticked("avoid"))
+        .and_then(|prefs| prefs.from(ticked("source"), ticked("kind"), t.contains_key("copyrighted")));
+    let prefs = match prefs {
         Ok(prefs) => prefs,
         Err(e) => return back("art", Err(e)),
     };

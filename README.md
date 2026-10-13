@@ -11,7 +11,7 @@ it stays smooth on very modest hardware.
 ## What it does
 
 - **A dashboard that is a painting.** Each day the hub picks a public-domain painting from
-  the Art Institute of Chicago. The frame shows it with the time, the weather and your
+  the Art Institute of Chicago, or from the other sources and kinds of work you tick. The frame shows it with the time, the weather and your
   projects in one of four layouts, all coloured from the painting itself. Tap the label to
   read about it and get a QR code for the museum's page; tap elsewhere for the next layout.
   You choose what it draws from: a period, a subject, and what to leave out.
@@ -189,11 +189,14 @@ for what changed.
 
 Paintings and their descriptions come from the
 [Art Institute of Chicago's public API](https://api.artic.edu/docs/); only works it marks as
-public domain are used. Forecasts and city search come from
+public domain are used unless you choose otherwise on the hub's page. The other sources there
+are the [Cleveland Museum of Art's Open Access API](https://openaccess-api.clevelandart.org/)
+and [WikiArt](https://www.wikiart.org/), whose most viewed paintings include many still in
+copyright: fine on a frame at home, not for showing in public. Forecasts and city search come from
 [Open-Meteo](https://open-meteo.com). Album artwork that Music does not have locally is
 looked up in the iTunes catalogue.
 
 ## Licence
 
-[MIT](LICENSE). The paintings shown are in the public domain; Mado's licence covers the
+[MIT](LICENSE). The paintings shown by default are in the public domain; Mado's licence covers the
 software, not the artwork or the museum's descriptions.

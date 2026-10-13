@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Art of the day has more to choose from. The hub's page takes any mix of three sources (the
+  Art Institute of Chicago, the Cleveland Museum of Art, and WikiArt's 600 most viewed
+  paintings) and of four kinds of work (paintings, prints, drawings and watercolours,
+  photographs). The day picks the source, and the others stand in if it has nothing that
+  fits. A switch lets the Art Institute send works still in copyright as well, for a frame
+  at home. Left alone it is as before: public-domain paintings from the Art Institute.
 - Night mode. During its night hours the frame shows only a deep amber clock on black, with
   the backlight at its lowest and Tama asleep. Whispers and nudges that arrive are kept and
   shown in the morning; urgent alerts show at once. A touch or two knocks wakes it for 45
