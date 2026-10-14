@@ -16,11 +16,21 @@ fun hubUrl(host: String, port: Int, path: String?): String {
     return "ws://$host:$port${if (p.startsWith("/")) p else "/$p"}"
 }
 
+/** The addresses in a saved hub setting: one, or several ways to reach it, comma-separated. */
+fun hubUrls(saved: String): List<String> = saved.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
 /**
  * The address meant by what a person typed: `192.168.1.20`, `hub.local:7878` or a whole
- * `ws://` address. Null when there is nothing to dial.
+ * `ws://` address, or several of these separated by commas. Null when there is nothing to dial.
  */
 fun typedHubUrl(typed: String): String? {
+    val parts = typed.split(',').filter { it.isNotBlank() }
+    if (parts.isEmpty()) return null
+    val urls = parts.map { typedOneHubUrl(it) ?: return null }
+    return urls.joinToString(",")
+}
+
+private fun typedOneHubUrl(typed: String): String? {
     val bare = typed.trim().substringAfter("://").trimEnd('/')
     if (bare.isEmpty() || bare.any { it.isWhitespace() }) return null
     val host = bare.substringBefore("/")

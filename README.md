@@ -177,6 +177,10 @@ Tap the hub's corner at the bottom of the rail to choose another hub or to type 
 --es hub ws://HOST:7878/frame` still works, and `--es hub none` makes the frame forget its
 hub and look again.
 
+A hub with more than one address (a server on both a cable and Wi-Fi, say) can be given all
+of them, separated by commas, typed or with `--es hub`. The frame moves to the next address
+whenever its link drops, so it follows the server from one to the other.
+
 The announcement does not leave a container on Docker's default network, so the Docker image
 keeps quiet (`MADO_ADVERTISE=off`) and a frame is given the address by hand. To have
 discovery with Docker on Linux, run the container with `network_mode: host` and

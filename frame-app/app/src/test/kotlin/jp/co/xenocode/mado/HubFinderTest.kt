@@ -25,5 +25,20 @@ class HubFinderTest {
         assertNull(typedHubUrl("   "))
         assertNull(typedHubUrl("two words"))
         assertNull(typedHubUrl(":7878"))
+        assertNull(typedHubUrl("192.0.2.7, two words"))
+    }
+
+    @Test
+    fun severalAddressesCanBeTypedAndSaved() {
+        assertEquals(
+            "ws://192.0.2.7:7879/frame,ws://192.0.2.8:7879/frame",
+            typedHubUrl("192.0.2.7:7879, 192.0.2.8:7879,"),
+        )
+        assertEquals(
+            listOf("ws://192.0.2.7:7879/frame", "ws://192.0.2.8:7879/frame"),
+            hubUrls("ws://192.0.2.7:7879/frame, ws://192.0.2.8:7879/frame"),
+        )
+        assertEquals(listOf("ws://192.0.2.7:7879/frame"), hubUrls("ws://192.0.2.7:7879/frame"))
+        assertEquals(emptyList<String>(), hubUrls(" , "))
     }
 }

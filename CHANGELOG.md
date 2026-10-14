@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A frame can be given several addresses for its hub, separated by commas, and moves to the
+  next one whenever its link drops. A server on both a cable and Wi-Fi would accept a frame
+  on its Wi-Fi address while the cable was in but never hear from it, and the frame stayed
+  stuck redialling it without the day's painting.
 - The rail's Sleep switch, and the hub's sleep, work while music is playing. Music used to
   keep the frame up, so the switch did nothing. Music that starts afterwards still wakes it.
 - While a player has a track on, the dashboard names it on one small line by the date,

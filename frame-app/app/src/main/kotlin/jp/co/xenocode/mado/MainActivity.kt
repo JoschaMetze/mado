@@ -503,8 +503,9 @@ class MainActivity : Activity(), HubLink.Listener {
         link?.stop()
         onHubLink(false)
         val hub = prefs().getString("hub", null)
-        rail.hubAddress = hub
-        if (hub == null) {
+        val urls = hubUrls(hub.orEmpty())
+        rail.hubAddress = urls.firstOrNull()
+        if (urls.isEmpty()) {
             finder.start()
             return
         }
@@ -515,7 +516,7 @@ class MainActivity : Activity(), HubLink.Listener {
             .put("api", Build.VERSION.SDK_INT)
             .put("w", resources.displayMetrics.widthPixels)
             .put("h", resources.displayMetrics.heightPixels)
-        link = HubLink(hub, hello, this).also { it.start() }
+        link = HubLink(urls, hello, this).also { it.start() }
     }
 
     override fun onHubLink(up: Boolean) {
@@ -529,6 +530,7 @@ class MainActivity : Activity(), HubLink.Listener {
         if (!up) hubHearsTama = false
         if (!up) hubHearsNight = false
         rail.linkUp = up
+        link?.let { rail.hubAddress = it.url }
         hubUp = up
         val uptime = SystemClock.uptimeMillis()
         if (up) {

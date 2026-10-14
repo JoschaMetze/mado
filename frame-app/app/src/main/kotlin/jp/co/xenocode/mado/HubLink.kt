@@ -17,8 +17,12 @@ import kotlin.math.min
 /**
  * The frame's one connection: an outbound WebSocket to the hub, redialled forever.
  * Listener callbacks arrive on the main thread.
+ *
+ * `urls` are other ways to reach the same hub (a server on both a cable and Wi-Fi, say).
+ * Each time a link is lost the next one is dialled, so an address that stops working is
+ * left within a ping or two even when it still accepts connections.
  */
-class HubLink(private val url: String, private val hello: JSONObject, private val listener: Listener) {
+class HubLink(private val urls: List<String>, private val hello: JSONObject, private val listener: Listener) {
     interface Listener {
         fun onHubMessage(msg: JSONObject)
         fun onHubLink(up: Boolean)
@@ -33,6 +37,10 @@ class HubLink(private val url: String, private val hello: JSONObject, private va
     private var socket: WebSocket? = null
     private var backoffMs = FIRST_BACKOFF_MS
     private var stopped = false
+    private var at = 0
+
+    /** The address in use, or being dialled. */
+    val url: String get() = urls[at]
 
     fun start() = dial()
 
@@ -71,7 +79,12 @@ class HubLink(private val url: String, private val hello: JSONObject, private va
         val request = try {
             Request.Builder().url(url).build()
         } catch (e: IllegalArgumentException) {
-            return // A hub address that is not a URL; nothing to redial until it is changed.
+            // A hub address that is not a URL: try the next one, or wait until it is changed.
+            if (urls.size > 1) {
+                at = (at + 1) % urls.size
+                main.postDelayed(redial, backoffMs)
+            }
+            return
         }
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -112,6 +125,7 @@ class HubLink(private val url: String, private val hello: JSONObject, private va
     private fun onLost(which: WebSocket) {
         if (which !== socket) return
         socket = null
+        at = (at + 1) % urls.size
         listener.onHubLink(false)
         if (!stopped) {
             main.postDelayed(redial, backoffMs)
