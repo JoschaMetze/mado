@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Tama is a small pet as well as a companion. It gets hungry and holds out a bowl, catches
+  things (sniffles, hiccups, a tummy ache, a glitch) and gets better by itself in a few hours;
+  a tap feeds it or gives it medicine, and it turns food down when it is full. Nothing about
+  it can end badly.
+- Tama's Quest, a page on the rail: a pixel-art RPG that plays itself. Realms mash two of
+  twelve genres together; creatures are made up from a seed; Tama levels up, finds hats and
+  snacks, makes friends, faints but never dies, and is cheered on by a tap. It goes on with
+  the page shut, faster while it is open, and catches up a little after the frame was off.
+  The quest and the glass share Tama: its hat, level-ups, hunger and sickness show in both,
+  the real night, weather, music and painting appear in the quest, and quest creatures now
+  and then wander out onto the dashboard. Saved in the app's `quest` preferences.
+- `frame_companion` takes `feed` and `medicine`, and `frame_state` has a `quest` line saying
+  how Tama's quest is going. The rail's rows close up a little to fit the extra page.
 - A frame can be given several addresses for its hub, separated by commas, and moves to the
   next one whenever its link drops. A server on both a cable and Wi-Fi would accept a frame
   on its Wi-Fi address while the cable was in but never hear from it, and the frame stayed

@@ -103,7 +103,8 @@ fn tools() -> Value {
                 nothing is written on the glass. Gestures: wave, nod, celebrate (for good news). \
                 Moods that last a while: happy, worried (something is not right, but it can wait); calm ends a mood. \
                 hide sends it out of sight for a while. Hobbies it will take up now: fog (draws in fogged glass), \
-                pebbles, mote, nap, peek, perch. Tama acts in its own way, and not at all if the owner has hidden it.",
+                pebbles, mote, nap, peek, perch. Care: feed (it is turned down when Tama is full) and medicine \
+                (when it is poorly; frame_state says). Tama acts in its own way, and not at all if the owner has hidden it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -140,7 +141,7 @@ fn tools() -> Value {
         },
         {
             "name": "frame_state",
-            "description": "Return which frames are connected, what Tama is doing, whether the frame is asleep, the hub's config and recent activity.",
+            "description": "Return which frames are connected, what Tama is doing and how its quest is going, whether the frame is asleep, the hub's config and recent activity.",
             "inputSchema": { "type": "object", "properties": {} }
         }
     ])

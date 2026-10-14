@@ -232,6 +232,43 @@ class TamaView(context: Context) : View(context), SensorEventListener {
     private val stackRect = RectF()
 
     private var lastFrame = 0L
+
+    /** Tama's body and adventures, shared with the quest page: hunger, sickness, its hat, its level. */
+    var quest: Quest? = null
+    /** While the quest page is open Tama is in there, not on the glass. */
+    var away = false
+        set(value) {
+            if (field && !value) stretchV = 6f
+            field = value
+            invalidate()
+        }
+    /** Poked, rather than cared for: the quest hears about it. */
+    var onPoked: (() -> Unit)? = null
+    // A meal from this side of the glass: it drops into the bowl and is eaten, or turned down.
+    private var meal: Food? = null
+    private var mealAt = 0L
+    private var mealFed: TamaNeeds.Fed? = null
+    private var medicineAt = 0L
+    private var nextTwitchAt = 0L
+    private var nextBubbleAt = 0L
+    private var floatText: String? = null
+    private var floatAt = 0L
+    // A creature from the quest that has wandered out onto the glass.
+    private var visitor: android.graphics.Bitmap? = null
+    private var visitorName = ""
+    private var visitorX = 0f
+    private var visitorY = 0f
+    private var visitorAt = 0L
+    private var scuffleAt = 0L
+    private var visitorDone: ((String) -> Unit)? = null
+    private val pixels = Paint()
+    private val pixelBox = RectF()
+    private val words = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        textSize = 30f
+        typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+        setShadowLayer(6f, 0f, 2f, 0xB0000000.toInt())
+    }
     private var tap: AudioTrack? = null
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -385,6 +422,8 @@ class TamaView(context: Context) : View(context), SensorEventListener {
                 hiding = true
                 hideUntil = now + if (ttlMs > 0) ttlMs else HIDE_MS
             }
+            action == "feed" -> return feed()
+            action == "medicine" -> return medicine()
             action == "calm" -> {
                 interrupt(now)
                 worryUntil = 0L
@@ -672,6 +711,165 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         }
     }
 
+    /** Where it is on the glass, for the quest page to open out of. */
+    fun spot() = x to y
+
+    /** Asleep in the daytime, for the quest, which waits politely. */
+    val napping get() = asleep()
+
+    private fun needs() = quest?.needs
+    private fun hungry() = needs()?.hungry == true && needs()?.sickness == null
+    private fun poorly() = needs()?.sickness
+
+    /** Free to hold out its bowl: hungry, awake and not busy with anything else. */
+    private fun holdingBowl(now: Long) = hungry() && meal == null && visitor == null && !asleep() && !night() && !held &&
+        alertLevel == null && gesture == null && fogPhase == Fog.NONE && hobby == null && !hiding && now > sulkUntil
+
+    /** Something to eat, from this side of the glass. Tama on the glass shows it; in the quest the page does. */
+    fun feed(): Boolean {
+        val q = quest ?: return false
+        val now = SystemClock.uptimeMillis()
+        val food = q.needs.nextFood(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY), Random)
+        if (away || visibility != VISIBLE) {
+            q.feed(food)
+            return true
+        }
+        interrupt(now)
+        wandering = false
+        meal = food
+        mealAt = now
+        mealFed = q.feed(food)
+        nextWanderAt = max(nextWanderAt, now + 8_000)
+        invalidate()
+        return true
+    }
+
+    /** Medicine, from this side of the glass. False when Tama is well. */
+    fun medicine(): Boolean {
+        val q = quest ?: return false
+        if (!q.medicine()) return false
+        if (!away && visibility == VISIBLE) {
+            val now = SystemClock.uptimeMillis()
+            interrupt(now)
+            wandering = false
+            medicineAt = now
+            nextWanderAt = max(nextWanderAt, now + 6_000)
+        }
+        invalidate()
+        return true
+    }
+
+    /** It went up a level on its quest. */
+    fun levelUp(level: Int) {
+        if (away || visibility != VISIBLE || asleep()) return
+        act("celebrate", 0)
+        say("LV $level!")
+    }
+
+    /** It found a better hat on its quest, and is wearing it. */
+    fun newHat() {
+        if (away || visibility != VISIBLE) return
+        stretchV = 7f
+        joyUntil = SystemClock.uptimeMillis() + 2_500
+        say("NEW HAT!")
+        invalidate()
+    }
+
+    private fun say(words: String) {
+        floatText = words
+        floatAt = SystemClock.uptimeMillis()
+        invalidate()
+    }
+
+    /**
+     * A creature from the quest wants to come out onto the glass. Tama goes to shoo it back in,
+     * if it is free; `done` is called with its name once it has. False if Tama is busy.
+     */
+    fun visit(sprite: android.graphics.Bitmap, name: String, done: (String) -> Unit): Boolean {
+        val now = SystemClock.uptimeMillis()
+        if (away || visibility != VISIBLE || held || alertLevel != null || asleep() || night() || hiding || gesture != null || meal != null || visitor != null || width == 0) return false
+        interrupt(now)
+        wandering = false
+        visitor = sprite
+        visitorName = name
+        visitorDone = done
+        visitorAt = now
+        scuffleAt = 0L
+        val fromLeft = x > width / 2f
+        visitorX = if (fromLeft) -60f else width + 60f
+        visitorY = (y + R * 0.85f).coerceIn(140f, height - 10f)
+        wide = 1.4f
+        invalidate()
+        return true
+    }
+
+    private fun stepCare(now: Long, dt: Float) {
+        val sick = poorly()
+        if (sick != null && now > nextTwitchAt && !asleep() && !held) {
+            when (sick) {
+                Sickness.SNIFFLES -> {
+                    if (nextTwitchAt != 0L) {
+                        stretchV = 9f
+                        flinchUntil = now + 450
+                        say("achoo!")
+                    }
+                    nextTwitchAt = now + Random.nextLong(25_000, 60_000)
+                }
+                Sickness.HICCUPS -> {
+                    if (nextTwitchAt != 0L) {
+                        stretchV = 5.5f
+                        say("hic!")
+                    }
+                    nextTwitchAt = now + Random.nextLong(3_000, 9_000)
+                }
+                else -> nextTwitchAt = now + 10_000
+            }
+        }
+        meal?.let {
+            if (now - mealAt > MEAL_MS) {
+                meal = null
+                if (mealFed == TamaNeeds.Fed.ATE || mealFed == TamaNeeds.Fed.LOVED) say(if (mealFed == TamaNeeds.Fed.LOVED) "♥ ♥" else "♥")
+            } else if (mealFed == TamaNeeds.Fed.ATE || mealFed == TamaNeeds.Fed.LOVED) {
+                // Three big bites.
+                val bite = ((now - mealAt - 700) / 550).toInt()
+                if (now - mealAt > 700 && bite < 3 && (now - mealAt - 700) % 550 < 60) stretchV = -4f
+                if (now - mealAt > 2_500 && now - mealAt < 2_600) {
+                    stretchV = 6f
+                    joyUntil = now + 2_000
+                }
+            } else if (mealFed == TamaNeeds.Fed.STUFFED) {
+                // A shake of the head.
+                lean = 0.25f * sin((now - mealAt) / 1000f * 14f) * max(0f, 1f - (now - mealAt) / 1600f)
+            }
+        }
+        if (medicineAt != 0L && now - medicineAt > 3_200) {
+            medicineAt = 0L
+            stretchV = 6f
+            joyUntil = now + 2_000
+        }
+        val v = visitor ?: return
+        val since = now - visitorAt
+        if (scuffleAt == 0L) {
+            val dx = x - visitorX
+            visitorX += (if (dx > 0) 1f else -1f) * VISITOR_SPEED * dt
+            if (abs(x - visitorX) < R * 2.1f || since > 20_000) {
+                scuffleAt = now
+                stretchV = 7f
+            }
+        } else if (now - scuffleAt > SCUFFLE_MS + POP_MS) {
+            visitor = null
+            visitorDone?.invoke(visitorName)
+            visitorDone = null
+            stretchV = 7f
+            joyUntil = now + 3_000
+            say("shoo!")
+            nextWanderAt = now + 6_000
+        } else if (now - scuffleAt < SCUFFLE_MS && (now / 140) % 3 == 0L) {
+            stretchV = 3f
+        }
+        if (v.isRecycled) visitor = null
+    }
+
     fun doingNow() = if (visibility == VISIBLE) doing.ifEmpty { "idle" } else "hidden by the owner"
 
     /** One or two words for what it is up to, for anyone asking the hub. */
@@ -689,6 +887,11 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         hobby == Hobby.PEEK -> "looking out"
         hobby == Hobby.PERCH -> "perched"
         hobby == Hobby.NAP -> "going for a nap"
+        visitor != null -> "shooing a quest monster off the glass"
+        meal != null -> "eating"
+        medicineAt != 0L -> "taking its medicine"
+        poorly() != null -> "poorly with ${poorly()!!.label}"
+        hungry() -> "holding out its bowl"
         phone -> "listening for the hub"
         wandering -> "wandering"
         now < worryUntil -> "worried"
@@ -898,8 +1101,11 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         } else if (phone) {
             pawX = x + R * 0.98f
             pawY = y + 12f
+        } else if (holdingBowl(now) || meal != null) {
+            pawX = x + R * 1.12f
+            pawY = y + R * 0.42f
         }
-        val reaching = fogPhase == Fog.DRAWING || (hobby == Hobby.PEBBLES && !going) || poking(now) || gesture == "wave" || phone
+        val reaching = fogPhase == Fog.DRAWING || (hobby == Hobby.PEBBLES && !going) || poking(now) || gesture == "wave" || phone || holdingBowl(now) || meal != null
         pawOut += ((if (reaching) 1f else 0f) - pawOut) * min(1f, dt * 8f)
         if (fogFadeAt != 0L) {
             fogAlpha = fogFadeFrom * (1f - (now - fogFadeAt) / FOG_LIFE_MS.toFloat())
@@ -954,7 +1160,8 @@ class TamaView(context: Context) : View(context), SensorEventListener {
                 nextWanderAt = now + 5_000
             }
         }
-        val settled = !held && !wandering && !hiding && gesture == null && alertLevel == null && fogPhase == Fog.NONE && hobby == null
+        stepCare(now, dt)
+        val settled = !held && !wandering && !hiding && gesture == null && alertLevel == null && fogPhase == Fog.NONE && hobby == null && meal == null && visitor == null && medicineAt == 0L
         if (now < happyUntil && settled && now > nextHappyHopAt) {
             nextHappyHopAt = now + Random.nextLong(4_000, 9_000)
             stretchV = 4.5f
@@ -1033,13 +1240,15 @@ class TamaView(context: Context) : View(context), SensorEventListener {
                 vx += (dx / far * SCOOT - vx) * min(1f, dt * 3f)
                 vy += (dy / far * SCOOT - vy) * min(1f, dt * 3f)
             }
-        } else if (fogPhase == Fog.NONE && hobby == null && gesture == null && now > sulkUntil && now > pinUntil) {
+        } else if (fogPhase == Fog.NONE && hobby == null && gesture == null && now > sulkUntil && now > pinUntil && meal == null && visitor == null && medicineAt == 0L) {
             val onWords = crowded(x, y)
             // Left sitting on words (dropped there, or the layout changed under it), it shuffles off.
             if (onWords) nextWanderAt = min(nextWanderAt, now + 1_200)
             val night = night()
             if (now > nextHobbyAt && !onWords && drives.restless(night)) {
-                begin(drives.choose(lastHobby, night) { Random.nextFloat() }, now)
+                val pick = drives.choose(lastHobby, night) { Random.nextFloat() }
+                // Hungry or poorly, it has no heart for games; it will still nap.
+                if ((hungry() || poorly() != null) && pick != Hobby.NAP) nextHobbyAt = now + 60_000 else begin(pick, now)
             } else if (now > nextWanderAt) {
                 wandering = pickSpot(nearest = onWords)
                 // One time in three, when it is free to choose, it heads for its usual spot.
@@ -1100,6 +1309,14 @@ class TamaView(context: Context) : View(context), SensorEventListener {
             val out = alertLevel == AlertView.URGENT && now / 1300 % 3 == 0L
             wantX = if (out) 0f else 0.95f
             wantY = if (out) 0f else -0.15f
+        } else if (visitor != null) {
+            val far = max(1f, hypot(visitorX - x, visitorY - R * 0.5f - y))
+            wantX = (visitorX - x) / far
+            wantY = (visitorY - R * 0.5f - y) / far
+        } else if (meal != null || holdingBowl(now)) {
+            // At the bowl while there is something in it; at you while there is not.
+            wantX = if (meal != null) 0.8f else 0f
+            wantY = if (meal != null) 0.5f else 0f
         } else if (press > 0.3f) {
             // Looking out into the room, slowly, from side to side.
             wantX = 0.7f * sin(now / 1000f * 1.1f)
@@ -1150,9 +1367,17 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         val now = SystemClock.uptimeMillis()
         val dt = if (lastFrame == 0L) 0f else min(0.05f, (now - lastFrame) / 1000f)
         lastFrame = now
+        if (away) {
+            // Off on its quest; it looks back in every so often.
+            postInvalidateDelayed(500)
+            return
+        }
         step(now, dt)
 
         val sulking = now < sulkUntil
+        val sick = poorly()
+        val bodyColor = if (sick == Sickness.TUMMY) SICK_BODY else BODY
+        val shadeColor = if (sick == Sickness.TUMMY) SICK_SHADE else SHADE
         val t = now / 1000f
         val knock = (now - knockStart) / 1000f
         var pulse = 1f
@@ -1272,19 +1497,29 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         tuft.moveTo(-8f, -R * 0.8f)
         tuft.quadTo(-12f - lean * 20f, -R * 1.25f, 6f - lean * 30f, -R * 1.3f)
         tuft.quadTo(4f, -R * 1.0f, 8f, -R * 0.8f)
-        paint.color = BODY
+        if (sick == Sickness.GLITCH && (now / 110) % 11 < 2) {
+            // Bits of it come apart into colours, the way a screen does.
+            paint.color = 0x9900E5FF.toInt()
+            oval.set(-R * 1.08f - 7f, -R * 0.88f, R * 1.08f - 7f, R * 0.88f)
+            canvas.drawOval(oval, paint)
+            paint.color = 0x99FF00C8.toInt()
+            oval.set(-R * 1.08f + 7f, -R * 0.88f + 2f, R * 1.08f + 7f, R * 0.88f + 2f)
+            canvas.drawOval(oval, paint)
+        }
+        paint.color = bodyColor
         canvas.drawPath(tuft, paint)
-        paint.color = SHADE
+        paint.color = shadeColor
         oval.set(-R * 1.08f, -R * 0.88f, R * 1.08f, R * 0.88f)
         canvas.drawOval(oval, paint)
-        paint.color = BODY
+        paint.color = bodyColor
         oval.set(-R * 1.06f, -R * 0.87f, R * 0.98f, R * 0.72f)
         canvas.drawOval(oval, paint)
         paint.color = 0x99FFFFFF.toInt()
         oval.set(-R * 0.62f, -R * 0.62f, -R * 0.28f, -R * 0.4f)
         canvas.drawOval(oval, paint)
 
-        if (sky == Sky.SNOW) {
+        val hat = quest?.hat
+        if (sky == Sky.SNOW && hat == null) {
             // Snow settles on its head.
             paint.color = 0xFFFFFFFF.toInt()
             oval.set(-R * 0.62f, -R * 1.0f, R * 0.56f, -R * 0.68f)
@@ -1314,6 +1549,13 @@ class TamaView(context: Context) : View(context), SensorEventListener {
             }
             line.color = INK
         }
+        if (hat != null) {
+            // Brought home from its quest, and still a little pixelated.
+            val bmp = Pixels.hat(hat)
+            val k = HAT_PIXEL
+            pixelBox.set(-bmp.width * k / 2f, -R * 0.64f - bmp.height * k, bmp.width * k / 2f, -R * 0.64f)
+            canvas.drawBitmap(bmp, null, pixelBox, pixels)
+        }
         if (hot) {
             val slide = (t * 0.35f) % 1f
             paint.color = DROP
@@ -1340,6 +1582,10 @@ class TamaView(context: Context) : View(context), SensorEventListener {
             val deep = asleep && now - hobbyAt > YAWN_MS
             express(now, deep, worried, hot, shiver != 0f, bopping, loving)
             face.draw(canvas, ex, ey, open, t)
+            if (sick == Sickness.SNIFFLES) {
+                paint.color = NOSE
+                canvas.drawCircle(ex, ey + R * 0.2f, R * 0.09f, paint)
+            }
             if (deep) {
                 // Fast asleep: a bubble at its nose that swells and shrinks with each breath.
                 val r = 9f + 220f * breath
@@ -1377,13 +1623,52 @@ class TamaView(context: Context) : View(context), SensorEventListener {
             val px = x + (pawX - x) * pawOut
             val py = y + (pawY - y) * pawOut
             if (hobby == Hobby.PEBBLES && !going && carryWait <= 0f) drawPebble(canvas, pebbles, px, py + 8f, 0f)
-            paint.color = SHADE
+            if (holdingBowl(now) || meal != null) drawBowl(canvas, px, py, now)
+            paint.color = shadeColor
             canvas.drawCircle(px + 1f, py + 1.5f, 10f, paint)
-            paint.color = BODY
+            paint.color = bodyColor
             canvas.drawCircle(px, py, 9.5f, paint)
         }
+        if (medicineAt != 0L && now - medicineAt < 1_600) {
+            // A spoonful, from this side of the glass.
+            val k = min(1f, (now - medicineAt) / 800f)
+            val sx = x + R * 1.7f + (R * 0.5f - R * 1.7f) * k
+            val sy = y - R * 2.2f + (R * 0.2f + R * 2.2f) * k
+            line.color = SPOON
+            line.strokeWidth = 5f
+            canvas.drawLine(sx + 14f, sy - 4f, sx + 64f, sy - 34f, line)
+            paint.color = SPOON
+            oval.set(sx - 14f, sy - 9f, sx + 16f, sy + 9f)
+            canvas.drawOval(oval, paint)
+            paint.color = MEDICINE
+            oval.set(sx - 10f, sy - 6f, sx + 12f, sy + 5f)
+            canvas.drawOval(oval, paint)
+            line.color = INK
+        }
+        val needy = (hungry() || sick != null) && !asleep && meal == null && medicineAt == 0L && visitor == null && !held
+        if (needy && now % BUBBLE_EVERY_MS < BUBBLE_MS) {
+            // What it is thinking about.
+            val bx = x + R * 1.05f
+            val by = y - R * 1.75f
+            paint.color = BUBBLE
+            canvas.drawCircle(x + R * 0.62f, y - R * 1.02f, 5f, paint)
+            canvas.drawCircle(x + R * 0.82f, y - R * 1.32f, 8f, paint)
+            canvas.drawCircle(bx, by, 32f, paint)
+            if (sick != null) drawPill(canvas, bx, by) else drawFood(canvas, needs()?.favourite() ?: Food.ONIGIRI, bx, by, 0.85f)
+        }
+        visitor?.let { drawVisitor(canvas, it, now) }
+        floatText?.let { said ->
+            val age = (now - floatAt) / 1000f
+            if (age > 1.8f) {
+                floatText = null
+            } else {
+                words.color = 0xFFFFFFFF.toInt()
+                words.alpha = (255 * min(1f, (1.8f - age) / 0.5f)).toInt()
+                canvas.drawText(said, x, y - R * 1.5f - age * 50f, words)
+            }
+        }
 
-        val busy = gesture != null || hiding || rising || now < tautUntil || alertLevel != null || bopping || fogPhase != Fog.NONE || (hobby != null && !asleep) || moteShown || pebblesFalling || press > 0.01f || wobble > 0.01f ||
+        val busy = meal != null || medicineAt != 0L || visitor != null || floatText != null || gesture != null || hiding || rising || now < tautUntil || alertLevel != null || bopping || fogPhase != Fog.NONE || (hobby != null && !asleep) || moteShown || pebblesFalling || press > 0.01f || wobble > 0.01f ||
             pawOut > 0.02f || held || wandering || hypot(vx, vy) > 4f || abs(stretch) > 0.004f || abs(stretchV) > 0.05f ||
             knock in 0f..KNOCK_SHOW_S || knockBackAt != 0L || now < watchUntil
         if (busy) postInvalidateOnAnimation() else postInvalidateDelayed(IDLE_FRAME_MS)
@@ -1403,6 +1688,183 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         oval.set(px - half * 0.6f, py - 6f, px + half * 0.2f, py - 1f)
         canvas.drawOval(oval, paint)
         canvas.restore()
+    }
+
+    /** The bowl it holds out when it is hungry, and what drops into it. */
+    private fun drawBowl(canvas: Canvas, px: Float, py: Float, now: Long) {
+        val m = meal
+        if (m != null) {
+            val since = now - mealAt
+            val fall = min(1f, since / 600f)
+            val eaten = mealFed == TamaNeeds.Fed.ATE || mealFed == TamaNeeds.Fed.LOVED
+            val bites = if (eaten) ((since - 700) / 550f).coerceIn(0f, 3f).toInt() else 0
+            val k = 1f - bites / 3f
+            if (k > 0f && since < MEAL_MS - 200) drawFood(canvas, m, px + 6f, py - 8f - (1f - fall) * (1f - fall) * 260f, 0.9f * k)
+            if (eaten && since in 700..2_400) {
+                // Crumbs.
+                paint.color = 0xFFFFE0B2.toInt()
+                for (i in 0 until 4) {
+                    val c = ((since - 700) % 550) / 550f
+                    canvas.drawCircle(px - 6f + i * 6f, py - 4f + c * 30f + i * 3f, 2f, paint)
+                }
+            }
+        }
+        paint.color = BOWL_SHADE
+        oval.set(px - 24f, py - 14f, px + 32f, py + 22f)
+        canvas.drawArc(oval, 0f, 180f, true, paint)
+        paint.color = BOWL
+        oval.set(px - 22f, py - 12f, px + 30f, py + 19f)
+        canvas.drawArc(oval, 0f, 180f, true, paint)
+        line.color = BOWL_RIM
+        line.strokeWidth = 3f
+        oval.set(px - 22f, py - 2f, px + 30f, py + 6f)
+        canvas.drawArc(oval, 10f, 160f, false, line)
+        line.color = INK
+    }
+
+    private fun drawPill(canvas: Canvas, cx: Float, cy: Float) {
+        canvas.save()
+        canvas.rotate(-30f, cx, cy)
+        paint.color = 0xFFEF5350.toInt()
+        oval.set(cx - 16f, cy - 7f, cx + 2f, cy + 7f)
+        canvas.drawRoundRect(oval, 7f, 7f, paint)
+        paint.color = 0xFFFFFFFF.toInt()
+        oval.set(cx - 2f, cy - 7f, cx + 16f, cy + 7f)
+        canvas.drawRoundRect(oval, 7f, 7f, paint)
+        line.color = 0x40000000
+        line.strokeWidth = 1.5f
+        oval.set(cx - 16f, cy - 7f, cx + 16f, cy + 7f)
+        canvas.drawRoundRect(oval, 7f, 7f, line)
+        line.color = INK
+        canvas.restore()
+    }
+
+    /** The foods from this side of the glass, at about 30 pixels across when `k` is 1. */
+    private fun drawFood(canvas: Canvas, food: Food, cx: Float, cy: Float, k: Float) {
+        canvas.save()
+        canvas.translate(cx, cy)
+        canvas.scale(k, k)
+        when (food) {
+            Food.ONIGIRI -> {
+                leaf.rewind()
+                leaf.moveTo(0f, -15f)
+                leaf.quadTo(4f, -15f, 15f, 8f)
+                leaf.quadTo(16f, 13f, 10f, 13f)
+                leaf.lineTo(-10f, 13f)
+                leaf.quadTo(-16f, 13f, -15f, 8f)
+                leaf.quadTo(-4f, -15f, 0f, -15f)
+                paint.color = 0xFFFAFAFA.toInt()
+                canvas.drawPath(leaf, paint)
+                paint.color = 0xFF263238.toInt()
+                canvas.drawRect(-6f, 1f, 6f, 13f, paint)
+            }
+            Food.DANGO -> {
+                line.color = 0xFFA1887F.toInt()
+                line.strokeWidth = 3f
+                canvas.drawLine(-16f, 14f, 14f, -14f, line)
+                for ((i, c) in listOf(0xFF9CCC65, 0xFFFFFFFF, 0xFFF48FB1).withIndex()) {
+                    paint.color = c.toInt()
+                    canvas.drawCircle(-8f + i * 8f, 6f - i * 8f, 7f, paint)
+                }
+            }
+            Food.TAIYAKI -> {
+                paint.color = 0xFFD9963F.toInt()
+                oval.set(-14f, -9f, 8f, 9f)
+                canvas.drawOval(oval, paint)
+                leaf.rewind()
+                leaf.moveTo(6f, 0f)
+                leaf.lineTo(16f, -9f)
+                leaf.lineTo(16f, 9f)
+                leaf.close()
+                canvas.drawPath(leaf, paint)
+                paint.color = INK
+                canvas.drawCircle(-8f, -2f, 1.8f, paint)
+                line.color = 0xFFB8752A.toInt()
+                line.strokeWidth = 1.5f
+                for (i in 0..2) canvas.drawLine(-3f + i * 4f, -6f, -3f + i * 4f, 6f, line)
+            }
+            Food.MELONPAN -> {
+                paint.color = 0xFFE8D27A.toInt()
+                canvas.drawCircle(0f, 0f, 14f, paint)
+                line.color = 0xFFC9AE52.toInt()
+                line.strokeWidth = 1.5f
+                for (i in -1..1) {
+                    canvas.drawLine(-12f, i * 6f - 6f, 12f, i * 6f + 6f, line)
+                    canvas.drawLine(-12f, i * 6f + 6f, 12f, i * 6f - 6f, line)
+                }
+            }
+            Food.STRAWBERRY -> {
+                paint.color = 0xFFE53935.toInt()
+                leaf.rewind()
+                leaf.moveTo(-13f, -6f)
+                leaf.quadTo(0f, -12f, 13f, -6f)
+                leaf.quadTo(10f, 10f, 0f, 15f)
+                leaf.quadTo(-10f, 10f, -13f, -6f)
+                canvas.drawPath(leaf, paint)
+                paint.color = 0xFFFFF59D.toInt()
+                for ((sx, sy) in listOf(-5f to -2f, 4f to -1f, 0f to 5f, -3f to 9f, 5f to 6f)) canvas.drawCircle(sx, sy, 1.2f, paint)
+                paint.color = 0xFF43A047.toInt()
+                oval.set(-9f, -13f, 9f, -6f)
+                canvas.drawOval(oval, paint)
+            }
+            Food.PUDDING -> {
+                leaf.rewind()
+                leaf.moveTo(-9f, -9f)
+                leaf.lineTo(9f, -9f)
+                leaf.lineTo(14f, 12f)
+                leaf.lineTo(-14f, 12f)
+                leaf.close()
+                paint.color = 0xFFFFE082.toInt()
+                canvas.drawPath(leaf, paint)
+                paint.color = 0xFF8D5524.toInt()
+                oval.set(-10f, -13f, 10f, -5f)
+                canvas.drawOval(oval, paint)
+                paint.color = 0xFFFAFAFA.toInt()
+                oval.set(-17f, 10f, 17f, 15f)
+                canvas.drawOval(oval, paint)
+            }
+        }
+        line.color = INK
+        canvas.restore()
+    }
+
+    /** The quest creature on the glass, the scuffle, and the coins it leaves as it goes back in. */
+    private fun drawVisitor(canvas: Canvas, bmp: android.graphics.Bitmap, now: Long) {
+        val t = now / 1000f
+        val k = VISITOR_PIXEL
+        val scuffle = if (scuffleAt == 0L) -1f else (now - scuffleAt) / 1000f
+        val pop = scuffle - SCUFFLE_MS / 1000f
+        val shrink = if (pop > 0f) max(0f, 1f - pop / (POP_MS / 1000f) * 2f) else 1f
+        val bw = bmp.width * k * shrink
+        val bh = bmp.height * k * shrink
+        val hop = if (scuffleAt == 0L) abs(sin(t * 9f)) * 8f else 0f
+        canvas.save()
+        if (visitorX < x) canvas.scale(-1f, 1f, visitorX, visitorY)
+        pixelBox.set(visitorX - bw / 2f, visitorY - bh - hop, visitorX + bw / 2f, visitorY - hop)
+        if (shrink > 0f) canvas.drawBitmap(bmp, null, pixelBox, pixels)
+        canvas.restore()
+        if (scuffle in 0f..SCUFFLE_MS / 1000f) {
+            val mx = (x + visitorX) / 2f
+            val my = (y + visitorY - bmp.height * k / 2f) / 2f
+            paint.color = DUST
+            for (i in 0 until 8) {
+                val a = i * 0.8f + t * 7f
+                canvas.drawCircle(mx + cos(a) * 34f + sin(t * 23f + i) * 6f, my + sin(a) * 22f, 22f + 5f * sin(t * 17f + i), paint)
+            }
+            paint.color = 0xFFFFE082.toInt()
+            for (i in 0 until 4) {
+                val a = t * 5f + i * 1.6f
+                canvas.drawCircle(mx + cos(a) * 50f, my - 30f + sin(a) * 14f, 4f, paint)
+            }
+        }
+        if (pop > 0f) {
+            for (i in 0 until 7) {
+                val a = -PI.toFloat() / 2f + (i - 3) * 0.32f
+                val sp = 300f + i % 3 * 60f
+                paint.color = if (i % 2 == 0) 0xFFFFD54F.toInt() else 0xFFFFB300.toInt()
+                canvas.drawCircle(visitorX + cos(a) * sp * pop, visitorY - bmp.height * k / 2f + sin(a) * sp * pop + 700f * pop * pop, 6f, paint)
+            }
+        }
     }
 
     /** For looking at a face while working on it: hold this one for a few seconds and stay put. */
@@ -1434,12 +1896,23 @@ class TamaView(context: Context) : View(context), SensorEventListener {
             now < flinchUntil -> f.set(Eyes.SQUEEZED, Mouth.WAVY)
             now < dizzyUntil -> f.set(Eyes.DIZZY, Mouth.WAVY)
             held -> f.set(Eyes.OPEN, Mouth.WAVY, Brows.RAISED)
+            visitor != null && scuffleAt == 0L -> f.set(Eyes.OPEN, Mouth.OH, Brows.ANGRY)
+            visitor != null && now - scuffleAt < SCUFFLE_MS -> f.set(Eyes.SQUEEZED, Mouth.GRIN, Brows.ANGRY)
+            meal != null && mealFed == TamaNeeds.Fed.STUFFED -> f.set(Eyes.HALF, Mouth.POUT)
+            meal != null && mealFed == TamaNeeds.Fed.TOO_POORLY -> f.set(Eyes.OPEN, Mouth.FROWN, Brows.WORRIED, tear = true)
+            meal != null && now - mealAt < 700 -> f.set(Eyes.SPARKLE, Mouth.OH)
+            meal != null && now - mealAt < 2_400 -> f.set(Eyes.HAPPY, if ((now - mealAt) % 550 < 270) Mouth.OH else Mouth.GRIN)
+            medicineAt != 0L && now - medicineAt < 800 -> f.set(Eyes.OPEN, Mouth.OH, Brows.WORRIED)
+            medicineAt != 0L && now - medicineAt < 2_200 -> f.set(Eyes.SQUEEZED, Mouth.WAVY)
+            medicineAt != 0L -> f.set(Eyes.SPARKLE, Mouth.GRIN)
             // The mote tickles its nose: a long "ah", then the sneeze.
             sneezing && !sneezed -> f.set(Eyes.HALF, Mouth.OH, Brows.WORRIED)
             sneezing && now < caughtAt + 1_900 -> f.set(Eyes.SQUEEZED, Mouth.GRIN)
             worried -> f.set(Eyes.OPEN, Mouth.WAVY, Brows.WORRIED)
             now < sadUntil -> f.set(Eyes.OPEN, Mouth.FROWN, Brows.WORRIED, tear = true)
             now < worryUntil -> f.set(Eyes.OPEN, Mouth.FROWN, Brows.WORRIED)
+            poorly() != null && now >= joyUntil -> f.set(Eyes.HALF, Mouth.WAVY, Brows.WORRIED)
+            holdingBowl(now) && now >= joyUntil -> f.set(Eyes.SPARKLE, Mouth.OH, Brows.WORRIED)
             now < annoyedUntil -> f.set(Eyes.HALF, Mouth.POUT, Brows.ANGRY)
             fogPhase == Fog.BREATHING -> f.set(Eyes.HALF, Mouth.OH)
             wide > 1.15f -> f.set(Eyes.OPEN, Mouth.OH, Brows.RAISED)
@@ -1467,7 +1940,8 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         val now = SystemClock.uptimeMillis()
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (hypot(event.x - x, event.y - y) > R * 1.4f) return false
+                if (away) return false
+                if (hypot(event.x - x, event.y - y) > R * 1.4f && (pawOut < 0.5f || hypot(event.x - pawX, event.y - pawY) > R)) return false
                 held = true
                 interrupt(now)
                 drives.touched()
@@ -1492,7 +1966,8 @@ class TamaView(context: Context) : View(context), SensorEventListener {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 held = false
                 nextWanderAt = now + 8_000
-                if (!dragged && now - downAt < 400) poked(now)
+                // Hungry or poorly, a tap is care rather than a poke.
+                if (!dragged && now - downAt < 400 && !(poorly()?.let { quest?.needs?.medicated == false && medicine() } ?: (hungry() && feed()))) poked(now)
                 // Thrown hard enough, its eyes go round and round for a bit.
                 if (hypot(vx, vy) > FLING) dizzyUntil = now + 2_600
             }
@@ -1501,6 +1976,7 @@ class TamaView(context: Context) : View(context), SensorEventListener {
     }
 
     private fun poked(now: Long) {
+        onPoked?.invoke()
         pokes.addLast(now)
         flinchUntil = now + 350
         // The third poke in a row is where it stops being funny.
@@ -1575,6 +2051,25 @@ class TamaView(context: Context) : View(context), SensorEventListener {
         const val SCARF = 0xFFD9534F.toInt()
         const val PHONES = 0xFF373C48.toInt()
         const val MAX_PEBBLES = 5
+        const val SICK_BODY = 0xFFE4EDC8.toInt()
+        const val SICK_SHADE = 0xFFC2D29A.toInt()
+        const val NOSE = 0xFFE57373.toInt()
+        const val BOWL = 0xFFFAFAFA.toInt()
+        const val BOWL_SHADE = 0xFFB0BEC5.toInt()
+        const val BOWL_RIM = 0xFF5C8DD6.toInt()
+        const val SPOON = 0xFFCFD8DC.toInt()
+        const val MEDICINE = 0xFFF06292.toInt()
+        const val BUBBLE = 0xE6FFFFFF.toInt()
+        const val DUST = 0xE6E0E0E0.toInt()
+        const val BUBBLE_EVERY_MS = 18_000L
+        const val BUBBLE_MS = 4_000L
+        const val MEAL_MS = 3_600L
+        /** Screen pixels per square, for things brought back from the quest. */
+        const val HAT_PIXEL = 4f
+        const val VISITOR_PIXEL = 4f
+        const val VISITOR_SPEED = 120f
+        const val SCUFFLE_MS = 2_200L
+        const val POP_MS = 1_200L
         const val STACK_STANDS_MS = 4 * 60_000L
         val PEBBLE_COLORS = intArrayOf(0xFF8D99A6.toInt(), 0xFFB9A58C.toInt(), 0xFF6F7C85.toInt(), 0xFFC9C3B8.toInt(), 0xFF9AA79A.toInt())
         const val DOODLE_SCALE = 1.3f

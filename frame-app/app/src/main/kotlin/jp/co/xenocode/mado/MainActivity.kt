@@ -42,6 +42,19 @@ class MainActivity : Activity(), HubLink.Listener {
     private lateinit var projectsPage: ProjectsView
     private lateinit var weatherPage: WeatherView
     private lateinit var messagesPage: MessagesView
+    private lateinit var questPage: QuestView
+    /** Tama's body and its quest, which plays itself whether or not anyone is looking. */
+    private val quest = Quest()
+    private var questTickAt = 0L
+    private var questSavedAt = 0L
+    private var questReported = ""
+    private var questReportedAt = 0L
+    private val questTicker = object : Runnable {
+        override fun run() {
+            tickQuest()
+            root.postDelayed(this, QUEST_TICK_MS)
+        }
+    }
     /** Everything the frame has been sent, kept across restarts for the messages page. */
     private val messages = MessageLog()
     private lateinit var nightView: NightView
@@ -170,11 +183,21 @@ class MainActivity : Activity(), HubLink.Listener {
         }
         messages.restore(getSharedPreferences("messages", MODE_PRIVATE).getString("log", null))
         messagesPage = MessagesView(this).apply { setMessages(messages.all) }
+        restoreQuest()
+        // Set after the catch-up, which happens before Tama is on the glass to show any of it.
+        quest.onCrossover = ::crossover
+        questPage = QuestView(this).apply {
+            quest = this@MainActivity.quest
+            onCover = { covered -> scenes[scene].visibility = if (covered) View.INVISIBLE else View.VISIBLE }
+            onClosing = { tama.away = false }
+        }
         scenes = listOf(dashboard, nowPlaying)
         tama = TamaView(this).apply {
             visibility = if (prefs().getBoolean("tama", true)) View.VISIBLE else View.GONE
             sound = prefs().getBoolean("tama_sound", false)
             onDoing = ::reportTama
+            quest = this@MainActivity.quest
+            onPoked = this@MainActivity.quest::poked
             night = { nightOn }
             onKnockTwice = ::peek
             keepOut = {
@@ -223,6 +246,7 @@ class MainActivity : Activity(), HubLink.Listener {
             addView(projectsPage)
             addView(weatherPage)
             addView(messagesPage)
+            addView(questPage)
             addView(nightView)
             addView(tama)
             addView(alerts)
@@ -238,6 +262,7 @@ class MainActivity : Activity(), HubLink.Listener {
         startupWatch.run()
         readNightHours()
         nightWatch.run()
+        questTicker.run()
     }
 
     // `am start ... --es hub ws://host:7878/frame` points the frame at a hub; it is remembered.
@@ -256,6 +281,30 @@ class MainActivity : Activity(), HubLink.Listener {
                 tama.pinFace(it.getOrElse(0) { "" }, it.getOrElse(1) { "" }, it.getOrElse(2) { "" }, it.getOrNull(3) == "tear")
             }
             if (intent.hasExtra("tama_music")) tama.music = intent.getBooleanExtra("tama_music", false)
+            // The quest: `--es quest open` (or beat, to move it on twenty beats, or visit), and Tama's
+            // needs: `--es tama_need hungry` (or sniffles, tummy, hiccups, glitch, well; feed and medicine
+            // are a tap on Tama).
+            when (intent.getStringExtra("quest")) {
+                "open" -> goTo(QUEST_ROW)
+                "beat" -> repeat(20) { quest.beat() }
+                "visit" -> repeat(200) { if (quest.foe == null || quest.phase != Quest.Phase.ROOM) quest.beat() }.also {
+                    quest.foe?.let { foe -> crossover(Quest.Crossover.Visitor(foe)) }
+                }
+            }
+            when (val need = intent.getStringExtra("tama_need")) {
+                null -> {}
+                "hungry" -> quest.needs.fullness = 0.2f
+                "feed" -> tama.feed()
+                "medicine" -> tama.medicine()
+                "well" -> {
+                    quest.needs.fullness = 0.7f
+                    quest.needs.sickness = null
+                }
+                else -> Sickness.values().firstOrNull { it.name.equals(need, ignoreCase = true) }?.let {
+                    quest.needs.sickness = null
+                    quest.needs.catch(it)
+                }
+            }
             // `--es night on` (or off) is the rail's Sleep switch.
             intent.getStringExtra("night")?.let { sleep(it == "on") }
             // The weather page under another sky: `--es weather storm --ez weather_night true`
@@ -269,6 +318,7 @@ class MainActivity : Activity(), HubLink.Listener {
     }
 
     override fun onPause() {
+        saveQuest()
         tama.remember()
         super.onPause()
     }
@@ -280,7 +330,10 @@ class MainActivity : Activity(), HubLink.Listener {
     }
 
     private fun reportTama(doing: String) {
-        if (hubHearsTama) link?.send(JSONObject().put("t", "event").put("kind", "tama").put("doing", doing))
+        if (!hubHearsTama) return
+        questReported = quest.summary()
+        questReportedAt = SystemClock.uptimeMillis()
+        link?.send(JSONObject().put("t", "event").put("kind", "tama").put("doing", doing).put("quest", questReported))
     }
 
     private fun prefs() = getSharedPreferences("mado", MODE_PRIVATE)
@@ -455,6 +508,7 @@ class MainActivity : Activity(), HubLink.Listener {
                 projectsPage.close()
                 weatherPage.close()
                 messagesPage.close()
+                questPage.close()
                 nightView.visibility = View.VISIBLE
                 nightView.animate().alpha(1f).setDuration(NIGHT_FADE_MS).withLayer()
                 // Tama sleeps on, but not as a bright spot in a dark room.
@@ -560,6 +614,7 @@ class MainActivity : Activity(), HubLink.Listener {
             this.here = null
             dashboard.setWeather(null)
             tama.setWeather(null)
+            quest.setWeather(null, 20)
             weatherPage.setPlaces(weatherPlaces())
         }
         // A failed refresh keeps the last forecast on screen rather than blanking it.
@@ -569,6 +624,7 @@ class MainActivity : Activity(), HubLink.Listener {
                 applyBrightness(false)
                 dashboard.setWeather(it)
                 tama.setWeather(it)
+                quest.setWeather(it.sky, it.tempC)
                 weatherPage.setPlaces(weatherPlaces())
             }
         } }
@@ -632,6 +688,7 @@ class MainActivity : Activity(), HubLink.Listener {
                             swatches = IntArray(5) { i -> parse(swatches?.optString(i), Color.GRAY) },
                         )
                     dashboard.setArt(art)
+                    quest.setPainting(art.title, art.artist)
                     paintingUp = true
                     tama.notice()
                     projectsPage.setArt(art)
@@ -708,6 +765,7 @@ class MainActivity : Activity(), HubLink.Listener {
                     link?.send(JSONObject().put("t", "event").put("kind", "held").put("id", alert.id))
                 } else {
                     tama.notice()
+                    quest.messageArrived()
                     alerts.show(alert)
                 }
             }
@@ -735,6 +793,60 @@ class MainActivity : Activity(), HubLink.Listener {
         }
     }
 
+    /** Tama dives into its quest: the page opens out of where it was sitting. */
+    private fun openQuest() {
+        val (tx, ty) = if (tama.visibility == View.VISIBLE) tama.spot() else root.width / 2f to root.height / 2f
+        questPage.open(tx, ty)
+        tama.away = true
+    }
+
+    private fun restoreQuest() {
+        val saved = getSharedPreferences("quest", MODE_PRIVATE)
+        quest.restore(saved.getString("state", null))
+        // Time passed while the frame was off. The clock reads 1970 for a while after boot,
+        // so only a sensible gap counts.
+        val at = saved.getLong("at", 0L)
+        val now = System.currentTimeMillis()
+        if (at > CLOCK_SET_AFTER_MS && now > CLOCK_SET_AFTER_MS && now > at) quest.away((now - at) / 1000f)
+    }
+
+    private fun saveQuest() {
+        // Not before the clock is set, or the gap next time would be fifty years.
+        val now = System.currentTimeMillis()
+        getSharedPreferences("quest", MODE_PRIVATE).edit()
+            .putString("state", quest.save())
+            .apply { if (now > CLOCK_SET_AFTER_MS) putLong("at", now) }
+            .apply()
+    }
+
+    private fun tickQuest() {
+        val uptime = SystemClock.uptimeMillis()
+        val dt = if (questTickAt == 0L) 0f else min(10f, (uptime - questTickAt) / 1000f)
+        questTickAt = uptime
+        quest.night = nightOn
+        quest.dozing = !nightOn && tama.visibility == View.VISIBLE && !tama.away && tama.napping
+        quest.watched = questPage.isOpen
+        quest.tick(dt)
+        if (uptime - questSavedAt > QUEST_SAVE_MS) {
+            questSavedAt = uptime
+            saveQuest()
+        }
+        if (hubHearsTama && quest.summary() != questReported && uptime - questReportedAt > QUEST_REPORT_MS) reportTama(tama.doingNow())
+    }
+
+    /** The quest reaching out onto the glass. */
+    private fun crossover(c: Quest.Crossover) {
+        when (c) {
+            is Quest.Crossover.LevelUp -> tama.levelUp(quest.level)
+            is Quest.Crossover.NewHat -> tama.newHat()
+            is Quest.Crossover.Visitor -> {
+                // Only onto the dashboard, with nothing else open and nobody asleep.
+                val clear = scene == DASHBOARD && !weatherPage.isOpen && !projectsPage.isOpen && !messagesPage.isOpen && !questPage.isOpen && !asleep
+                if (clear && tama.visit(Pixels.foe(c.foe), c.foe.name, quest::visited)) quest.visiting(c.foe.name)
+            }
+        }
+    }
+
     private fun messagesChanged() {
         getSharedPreferences("messages", MODE_PRIVATE).edit().putString("log", messages.text()).apply()
         messagesPage.setMessages(messages.all)
@@ -748,7 +860,7 @@ class MainActivity : Activity(), HubLink.Listener {
         val rows = listOfNotNull(
             DASHBOARD_ROW, NOW_PLAYING_ROW,
             WEATHER_ROW.takeIf { weatherPlaces().isNotEmpty() }, PROJECTS_ROW.takeIf { projectList.isNotEmpty() },
-            MESSAGES_ROW.takeIf { messages.all.isNotEmpty() },
+            MESSAGES_ROW.takeIf { messages.all.isNotEmpty() }, QUEST_ROW,
         )
         rail.scenes = rows
         rail.activeScene = rows.indexOf(
@@ -756,6 +868,7 @@ class MainActivity : Activity(), HubLink.Listener {
                 weatherPage.isOpen -> WEATHER_ROW
                 projectsPage.isOpen -> PROJECTS_ROW
                 messagesPage.isOpen -> MESSAGES_ROW
+                questPage.isOpen -> QUEST_ROW
                 scene == NOW_PLAYING -> NOW_PLAYING_ROW
                 else -> DASHBOARD_ROW
             }
@@ -769,10 +882,12 @@ class MainActivity : Activity(), HubLink.Listener {
         if (row != PROJECTS_ROW) projectsPage.close()
         if (row != WEATHER_ROW) weatherPage.close()
         if (row != MESSAGES_ROW) messagesPage.close()
+        if (row != QUEST_ROW) questPage.close()
         when (row) {
             WEATHER_ROW -> if (!weatherPage.isOpen) weatherPage.open(here, root.width / 2f, root.height / 2f)
             PROJECTS_ROW -> if (!projectsPage.isOpen) projectsPage.open()
             MESSAGES_ROW -> if (!messagesPage.isOpen) messagesPage.open()
+            QUEST_ROW -> if (!questPage.isOpen) openQuest()
         }
     }
 
@@ -781,6 +896,7 @@ class MainActivity : Activity(), HubLink.Listener {
         projectsPage.close()
         weatherPage.close()
         messagesPage.close()
+        questPage.close()
         val leaving = scenes[scene]
         val arriving = scenes[index]
         scene = index
@@ -800,6 +916,7 @@ class MainActivity : Activity(), HubLink.Listener {
         val playing = state == "playing"
         tama.music = playing
         val title = msg.optString("title")
+        quest.setMusic(msg.optString("artist"), title, playing)
         dashboard.setMusic(if (state == "stopped" || title.isEmpty()) null else DashboardView.Music(title, msg.optString("artist"), playing))
         if (playing && msg.optString("title") != trackTitle) {
             trackTitle = msg.optString("title")
@@ -897,6 +1014,10 @@ class MainActivity : Activity(), HubLink.Listener {
         const val WEATHER_ROW = "Weather"
         const val PROJECTS_ROW = "Projects"
         const val MESSAGES_ROW = "Messages"
+        const val QUEST_ROW = "Tama's Quest"
+        const val QUEST_TICK_MS = 1_000L
+        const val QUEST_SAVE_MS = 2 * 60_000L
+        const val QUEST_REPORT_MS = 60_000L
         /** Where the stage rests when nothing else wants it. */
         const val HOME = DASHBOARD
         const val SCENE_FADE_MS = 700L

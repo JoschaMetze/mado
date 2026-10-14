@@ -114,8 +114,9 @@ pub struct Companion {
     pub source: Option<String>,
 }
 
-/// What Tama can be asked for: hobbies, gestures, moods that last a while, and "calm" to drop a mood.
-pub const COMPANION_ACTIONS: [&str; 13] = [
+/// What Tama can be asked for: hobbies, gestures, moods that last a while, "calm" to drop a mood,
+/// and care: something to eat, or medicine when it is poorly.
+pub const COMPANION_ACTIONS: [&str; 15] = [
     "wave",
     "nod",
     "celebrate",
@@ -129,6 +130,8 @@ pub const COMPANION_ACTIONS: [&str; 13] = [
     "nap",
     "peek",
     "perch",
+    "feed",
+    "medicine",
 ];
 
 pub struct FrameConn {
@@ -154,6 +157,8 @@ pub struct Hub {
     pub projects: Mutex<Vec<projects::Project>>,
     /// What Tama was last seen doing, as the frame reported it.
     pub tama: Mutex<Option<String>>,
+    /// How Tama's quest is going, in a sentence, as the frame reported it.
+    pub quest: Mutex<Option<String>>,
     /// Whether the frame said it is in night mode; None until one has said.
     pub asleep: Mutex<Option<bool>>,
     pub data_dir: PathBuf,
@@ -183,6 +188,7 @@ impl Hub {
             art_busy: AtomicBool::new(false),
             projects: Mutex::new(projects),
             tama: Mutex::default(),
+            quest: Mutex::default(),
             asleep: Mutex::default(),
             data_dir,
             looks: Mutex::default(),
@@ -328,9 +334,10 @@ impl Hub {
         let art = self.art.lock().unwrap().as_ref().map(|a| a.message());
         let projects = self.projects_message()["items"].take();
         let tama = self.tama.lock().unwrap().clone();
+        let quest = self.quest.lock().unwrap().clone();
         let asleep = *self.asleep.lock().unwrap();
         json!({
-            "frames": frames, "tama": tama, "asleep": asleep, "now_playing": now_playing, "art": art, "projects": projects,
+            "frames": frames, "tama": tama, "quest": quest, "asleep": asleep, "now_playing": now_playing, "art": art, "projects": projects,
             "config": *self.config.read().unwrap(), "recent": recent,
         })
     }
@@ -357,6 +364,9 @@ impl Hub {
             }
             Some("event") if msg["kind"] == "tama" => {
                 *self.tama.lock().unwrap() = msg["doing"].as_str().map(str::to_owned);
+                if let Some(quest) = msg["quest"].as_str() {
+                    *self.quest.lock().unwrap() = Some(quest.to_owned());
+                }
             }
             Some("event") if msg["kind"] == "night" => {
                 *self.asleep.lock().unwrap() = msg["asleep"].as_bool();
@@ -425,6 +435,7 @@ async fn frame_session(socket: WebSocket, hub: Shared) {
     frames.remove(&id);
     if frames.is_empty() {
         *hub.tama.lock().unwrap() = None;
+        *hub.quest.lock().unwrap() = None;
         *hub.asleep.lock().unwrap() = None;
     }
     drop(frames);

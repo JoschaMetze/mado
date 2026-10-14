@@ -119,12 +119,13 @@ class RailView(context: Context) : View(context) {
         small.alpha = 150
         canvas.drawText("MADO", PAD, 62f, small)
 
+        val step = rowStep()
         scenes.forEachIndexed { i, name ->
-            val top = SCENE_Y + i * ROW_STEP
-            val mid = top + ROW_H / 2
+            val top = SCENE_Y + i * step
+            val mid = top + (step - 6f) / 2
             if (i == activeScene) {
                 fill.color = 0x24FFFFFF
-                rect.set(14f, top, W - 14f, top + ROW_H)
+                rect.set(14f, top, W - 14f, top + step - 6f)
                 canvas.drawRoundRect(rect, 14f, 14f, fill)
                 fill.color = FG
                 canvas.drawCircle(PAD + 8f, mid, 6f, fill)
@@ -231,11 +232,17 @@ class RailView(context: Context) : View(context) {
         return true
     }
 
-    private fun sliderY() = SCENE_Y + scenes.size * ROW_STEP + 60f
+    /** The scenes' rows close up when there are many, so the switches and the hub's corner still fit. */
+    private fun rowStep(): Float {
+        val room = height - SCENE_Y - 60f - 34f - 4 * LOW_STEP - HUB_H
+        return if (scenes.isEmpty() || height == 0) ROW_STEP else min(ROW_STEP, room / scenes.size)
+    }
+
+    private fun sliderY() = SCENE_Y + scenes.size * rowStep() + 60f
 
     private fun press(lifted: Boolean) {
         val homeY = sliderY() + 34f
-        val scene = ((downY - SCENE_Y) / ROW_STEP).toInt()
+        val scene = ((downY - SCENE_Y) / rowStep()).toInt()
         when {
             !lifted -> settle(true)
             downY > height - HUB_H -> {

@@ -47,6 +47,22 @@ Tama, a small creature, lives on the glass above every scene. It wanders, amuses
 music, frets beside urgent alerts, and can be poked, carried and tilted. The rail has switches
 to hide it and to mute it.
 
+Tama is also a small pet. It gets hungry and holds out its bowl; it catches the sniffles, the
+hiccups, a tummy ache or, from too long in the arcade, a glitch. A tap on it feeds it or gives
+it its medicine. Nothing ever goes worse than a mope: it gets better by itself, and on its
+quests it forages when nobody feeds it.
+
+Those quests are Tama's Quest, a page on the rail: an RPG that plays itself in big pixels.
+Every quest is set in a realm made of two genres mashed together (a Hardboiled Pantry, a
+Haunted Space Station, a Cosmic Karaoke Box), with creatures made up on the spot, loot,
+riddles, shops, friends who join the party, and a boss. Nobody dies; foes are befriended, and
+Tama faints and is carried back to camp. It goes on whether or not anyone watches, slowly,
+and faster while the page is open; tap the scene to cheer Tama on in a fight. The two worlds
+leak into each other: Tama wears its best hat on the glass, celebrates its level-ups there,
+and now and then a quest creature wanders out onto the dashboard and has to be shooed back
+in. The real night, weather, music and painting of the day turn up in the quest, and a nap on
+the glass is a nap in the quest.
+
 At night the frame sleeps: a deep amber clock on black with the backlight turned right down,
 and Tama asleep. Whispers and nudges wait for the morning; urgent alerts still show. Touch it
 or knock twice on the desk and it comes back for a moment. The hours are set on the hub's
@@ -147,7 +163,7 @@ curl -X POST http://HOST:7878/api/notify \
 |---|---|
 | `frame_notify` | Show an alert |
 | `frame_sleep`, `frame_wake` | Put the frame into night mode, or end it |
-| `frame_companion` | Ask Tama for a gesture (`wave`, `nod`, `celebrate`), a mood (`happy`, `worried`, `calm`), to `hide`, or a hobby |
+| `frame_companion` | Ask Tama for a gesture (`wave`, `nod`, `celebrate`), a mood (`happy`, `worried`, `calm`), to `hide`, a hobby, or care (`feed`, `medicine`) |
 | `frame_project` | Report where a project stands |
 | `frame_look` | Get a picture of the frame's screen, so an agent can see its own work |
 | `frame_state` | The same as `GET /api/state` |
