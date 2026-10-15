@@ -218,7 +218,7 @@ class DashboardView(context: Context) : View(context) {
         val big = width >= 1000f
         val rowH = if (big) 62f else UP_ROW
         val dividerH = if (big) 36f else UP_DIVIDER
-        val timeW = if (big) 116f else UP_TIME_W
+        val timeW = if (big) 156f else UP_TIME_W
         val pad = if (big) 36f else 30f
         val headTop = if (big) 52f else 44f
         val height = headTop + rows.sumOf { (if (it.event == null) dividerH else rowH).toDouble() }.toFloat() - (if (big) 26f else 20f)
@@ -238,7 +238,7 @@ class DashboardView(context: Context) : View(context) {
             }
             val on = e.isOn(now.time)
             val lead = if (on) "NOW" else a.time(e.startMs)
-            canvas.drawText(lead, x, ry, mono(color, if (on) 1f else 0.8f, if (big) 22f else 17f, shadow = shadow))
+            canvas.drawText(lead, x, ry, mono(color, if (on) 1f else 0.85f, if (big) 30f else 22f, shadow = shadow))
             // A narrow column keeps its room for the title.
             val place = if (width < 520f) "" else e.location.uppercase()
             val placePaint = mono(color, 0.6f, if (big) 15f else 13f, Paint.Align.RIGHT, shadow = shadow)
@@ -801,7 +801,7 @@ class DashboardView(context: Context) : View(context) {
         private const val AWAY_STEP = 27f
         private const val UP_ROW = 48f
         private const val UP_DIVIDER = 30f
-        private const val UP_TIME_W = 86f
+        private const val UP_TIME_W = 108f
         private const val LEARN_W = 564f
         private const val LEARN_TEXT_W = 460
         private const val WAITING_DOTS = 10
