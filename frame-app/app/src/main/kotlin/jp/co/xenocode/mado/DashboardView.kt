@@ -214,38 +214,41 @@ class DashboardView(context: Context) : View(context) {
         val (heading, rows) = upcomingRows(now.time, most)
         if (rows.isEmpty()) return 0f
         val a = agenda ?: return 0f
-        val height = 40f + rows.sumOf { (if (it.event == null) UP_DIVIDER else UP_ROW).toDouble() }.toFloat()
+        // A card that spans the glass (standing up) gets larger type, for reading across the room.
+        val big = width >= 1000f
+        val rowH = if (big) 62f else UP_ROW
+        val dividerH = if (big) 36f else UP_DIVIDER
+        val timeW = if (big) 116f else UP_TIME_W
+        val pad = if (big) 36f else 30f
+        val headTop = if (big) 52f else 44f
+        val height = headTop + rows.sumOf { (if (it.event == null) dividerH else rowH).toDouble() }.toFloat() - (if (big) 26f else 20f)
         if (plaque) {
             fill.color = 0x70000000
-            rect.set(x - 22f, y - 26f, x + width + 22f, y + height + 4f)
-            canvas.drawRoundRect(rect, 14f, 14f, fill)
+            rect.set(x - pad, y - pad, x + width + pad, y + height + pad)
+            canvas.drawRoundRect(rect, 16f, 16f, fill)
         }
-        canvas.drawText(heading, x, y, mono(color, 0.7f, 14f, shadow = shadow))
-        var ry = y + 44f
+        canvas.drawText(heading, x, y, mono(color, 0.7f, if (big) 16f else 14f, shadow = shadow))
+        var ry = y + headTop
         for (row in rows) {
             val e = row.event
             if (e == null) {
-                canvas.drawText(row.label, x, ry - 8f, mono(color, 0.55f, 13f, shadow = shadow))
-                ry += UP_DIVIDER
+                canvas.drawText(row.label, x, ry - 8f, mono(color, 0.55f, if (big) 15f else 13f, shadow = shadow))
+                ry += dividerH
                 continue
             }
             val on = e.isOn(now.time)
             val lead = if (on) "NOW" else a.time(e.startMs)
-            canvas.drawText(lead, x, ry, mono(color, if (on) 1f else 0.8f, 17f, shadow = shadow))
-            if (on) {
-                fill.color = withAlpha(color, 0.9f)
-                canvas.drawCircle(x - 11f, ry - 7f, 4f, fill)
-            }
+            canvas.drawText(lead, x, ry, mono(color, if (on) 1f else 0.8f, if (big) 22f else 17f, shadow = shadow))
             // A narrow column keeps its room for the title.
             val place = if (width < 520f) "" else e.location.uppercase()
-            val placePaint = mono(color, 0.6f, 13f, Paint.Align.RIGHT, shadow = shadow)
+            val placePaint = mono(color, 0.6f, if (big) 15f else 13f, Paint.Align.RIGHT, shadow = shadow)
             val placeW = if (place.isEmpty()) 0f else text.measureText(place) + 18f
             if (place.isNotEmpty()) canvas.drawText(place, x + width, ry, placePaint)
-            val titlePaint = type(27f, if (on) bold else sans, color, if (on) 1f else 0.92f, shadow = shadow)
-            canvas.drawText(fit(e.title, titlePaint, width - UP_TIME_W - placeW), x + UP_TIME_W, ry, text)
-            ry += UP_ROW
+            val titlePaint = type(if (big) 36f else 27f, if (on) bold else sans, color, if (on) 1f else 0.92f, shadow = shadow)
+            canvas.drawText(fit(e.title, titlePaint, width - timeW - placeW), x + timeW, ry, text)
+            ry += rowH
         }
-        upcoming.set(x - 22f, y - 26f, x + width + 22f, y + height + 4f)
+        upcoming.set(x - pad, y - pad, x + width + pad, y + height + pad)
         quiet(upcoming.left, upcoming.top, upcoming.right, upcoming.bottom)
         return height
     }
@@ -408,7 +411,9 @@ class DashboardView(context: Context) : View(context) {
             y += 62f
         }
         if (projects.isNotEmpty()) studio.set(w - 564f, 24f, w, y - 14f)
-        drawUpcoming(canvas, w - 52f - 600f, (if (projects.isEmpty()) 70f else y + 30f), 600f, WHITE, 4, plaque = true, shadow = true)
+        // Lying down the card hangs top right beside the label; standing up it spans the glass under it.
+        if (h > w) drawUpcoming(canvas, 52f, max(196f, if (projects.isEmpty()) 0f else y + 36f), w - 104f, WHITE, 5, plaque = true, shadow = true)
+        else drawUpcoming(canvas, w - 52f - 600f, (if (projects.isEmpty()) 70f else y + 30f), 600f, WHITE, 4, plaque = true, shadow = true)
 
         val time = time()
         canvas.drawText(time, 40f, h - 44f, type(186f, thin, WHITE, spacing = -0.02f, shadow = true))
@@ -650,7 +655,8 @@ class DashboardView(context: Context) : View(context) {
         run {
             val from = 470f + min(3, away.size) * 30f + (if (music == null) 0f else 30f)
             val room = ((h - 280f - from) / UP_ROW).toInt()
-            if (room >= 1) drawUpcoming(canvas, w / 2 - 380f, from + 24f, 760f, WHITE, min(room, 3), plaque = true, shadow = true)
+            val cardW = if (h > w) w - 104f else 760f
+            if (room >= 1) drawUpcoming(canvas, w / 2 - cardW / 2, from + 24f, cardW, WHITE, min(room, if (h > w) 5 else 3), plaque = true, shadow = true)
         }
     }
 
