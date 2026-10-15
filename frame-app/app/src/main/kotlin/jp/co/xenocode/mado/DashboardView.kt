@@ -60,6 +60,8 @@ class DashboardView(context: Context) : View(context) {
     /** The line about the music was tapped. */
     var onMusic: (() -> Unit)? = null
     var onProjects: (() -> Unit)? = null
+    /** The line about the next meeting was tapped. */
+    var onAgenda: (() -> Unit)? = null
     /** A place's weather was tapped, at this point on the glass. */
     var onWeather: ((Weather, Float, Float) -> Unit)? = null
     var layout = FULL_BLEED
@@ -81,6 +83,9 @@ class DashboardView(context: Context) : View(context) {
 
     private var away: List<Away> = emptyList()
     private var music: Music? = null
+    private var agenda: Agenda? = null
+    /** Where the next-up card is in the current layout, for taps; empty when it is not drawn. */
+    private val upcoming = RectF()
     private var learnOpen = false
     private var learn = 0f
     private var learnTitle: StaticLayout? = null
@@ -174,6 +179,75 @@ class DashboardView(context: Context) : View(context) {
         if (music == this.music) return
         this.music = music
         invalidate()
+    }
+
+    /** The owner's calendar; the next meeting gets the music's line while nothing is playing. */
+    fun setAgenda(agenda: Agenda?) {
+        this.agenda = agenda
+        invalidate()
+    }
+
+    /** A row of the next-up card: a meeting, or a divider that says the rows below are tomorrow's. */
+    private class Up(val event: AgendaEvent?, val label: String = "")
+
+    /** What the next-up card lists: the meeting on now and the ones still to come today, then tomorrow's first ones. */
+    private fun upcomingRows(nowMs: Long, most: Int): Pair<String, List<Up>> {
+        val a = agenda ?: return "" to emptyList()
+        val today = a.on(nowMs).filter { it.counts && it.endMs > nowMs }.take(most)
+        val rows = today.map { Up(it) }.toMutableList()
+        if (rows.size < most) {
+            val tomorrow = a.on(a.dayStart(nowMs) + Agenda.DAY_MS).filter { it.counts }.take(most - rows.size)
+            if (tomorrow.isNotEmpty()) {
+                if (rows.isNotEmpty()) rows.add(Up(null, "TOMORROW"))
+                rows.addAll(tomorrow.map { Up(it) })
+            }
+        }
+        return (if (today.isEmpty()) "TOMORROW" else "NEXT UP") to rows
+    }
+
+    /**
+     * A small card with the next few meetings: a heading, then a row each with the time (or NOW),
+     * the title and where it is. On a painting it gets a dark plaque behind it. Returns its height,
+     * 0 when there was nothing to show. Tapping it opens the agenda.
+     */
+    private fun drawUpcoming(canvas: Canvas, x: Float, y: Float, width: Float, color: Int, most: Int, plaque: Boolean, shadow: Boolean): Float {
+        val (heading, rows) = upcomingRows(now.time, most)
+        if (rows.isEmpty()) return 0f
+        val a = agenda ?: return 0f
+        val height = 40f + rows.sumOf { (if (it.event == null) UP_DIVIDER else UP_ROW).toDouble() }.toFloat()
+        if (plaque) {
+            fill.color = 0x70000000
+            rect.set(x - 22f, y - 26f, x + width + 22f, y + height + 4f)
+            canvas.drawRoundRect(rect, 14f, 14f, fill)
+        }
+        canvas.drawText(heading, x, y, mono(color, 0.7f, 14f, shadow = shadow))
+        var ry = y + 44f
+        for (row in rows) {
+            val e = row.event
+            if (e == null) {
+                canvas.drawText(row.label, x, ry - 8f, mono(color, 0.55f, 13f, shadow = shadow))
+                ry += UP_DIVIDER
+                continue
+            }
+            val on = e.isOn(now.time)
+            val lead = if (on) "NOW" else a.time(e.startMs)
+            canvas.drawText(lead, x, ry, mono(color, if (on) 1f else 0.8f, 17f, shadow = shadow))
+            if (on) {
+                fill.color = withAlpha(color, 0.9f)
+                canvas.drawCircle(x - 11f, ry - 7f, 4f, fill)
+            }
+            // A narrow column keeps its room for the title.
+            val place = if (width < 520f) "" else e.location.uppercase()
+            val placePaint = mono(color, 0.6f, 13f, Paint.Align.RIGHT, shadow = shadow)
+            val placeW = if (place.isEmpty()) 0f else text.measureText(place) + 18f
+            if (place.isNotEmpty()) canvas.drawText(place, x + width, ry, placePaint)
+            val titlePaint = type(27f, if (on) bold else sans, color, if (on) 1f else 0.92f, shadow = shadow)
+            canvas.drawText(fit(e.title, titlePaint, width - UP_TIME_W - placeW), x + UP_TIME_W, ry, text)
+            ry += UP_ROW
+        }
+        upcoming.set(x - 22f, y - 26f, x + width + 22f, y + height + 4f)
+        quiet(upcoming.left, upcoming.top, upcoming.right, upcoming.bottom)
+        return height
     }
 
     /** The track on one line, led by a small note; fainter while it is paused. Tapping it opens now playing. */
@@ -280,6 +354,7 @@ class DashboardView(context: Context) : View(context) {
         studio.setEmpty()
         studio2.setEmpty()
         tune.setEmpty()
+        upcoming.setEmpty()
         textZones.clear()
         spots.clear()
         when (layout) {
@@ -333,6 +408,7 @@ class DashboardView(context: Context) : View(context) {
             y += 62f
         }
         if (projects.isNotEmpty()) studio.set(w - 564f, 24f, w, y - 14f)
+        drawUpcoming(canvas, w - 52f - 600f, (if (projects.isEmpty()) 70f else y + 30f), 600f, WHITE, 4, plaque = true, shadow = true)
 
         val time = time()
         canvas.drawText(time, 40f, h - 44f, type(186f, thin, WHITE, spacing = -0.02f, shadow = true))
@@ -341,7 +417,7 @@ class DashboardView(context: Context) : View(context) {
         val up = if (music == null) 0f else 26f
         canvas.drawText(day(weekday).uppercase(), x, h - 82f - up, mono(WHITE, shadow = true, size = 16f))
         canvas.drawText(day(dayMonth).uppercase(), x, h - 56f - up, mono(WHITE, shadow = true, size = 16f))
-        drawMusic(canvas, x, h - 56f, 330f, WHITE, 0.9f, Paint.Align.LEFT, shadow = true)
+        drawMusic(canvas, x, h - 56f, min(520f, w - x - 420f), WHITE, 0.9f, Paint.Align.LEFT, shadow = true)
         quiet(30f, h - 188f, x + 190f, h - 24f)
 
         val awayA = away.take(3)
@@ -416,6 +492,10 @@ class DashboardView(context: Context) : View(context) {
 
         quiet(x - 16f, 50f, w, sectionEnd + 12f)
         val top = 736f - projects.size * 62f
+        run {
+            val room = ((top - 30f - 20f - (sectionEnd + 52f)) / UP_ROW).toInt()
+            if (room >= 1) drawUpcoming(canvas, x, sectionEnd + 52f, right - x, art.paper, min(room, 4), plaque = false, shadow = false)
+        }
         // With four projects and other places above, there is no room left for the heading.
         if (projects.isNotEmpty() && top - 30f - sectionEnd >= 34f) canvas.drawText("IN THE STUDIO", x, top - 30f, mono(art.paper, 0.55f, 14f))
         var y = top
@@ -465,6 +545,12 @@ class DashboardView(context: Context) : View(context) {
         // Clock, weather and projects nearly fill the panel, so all of it is off limits.
         quiet(split, 0f, w, h)
         var y = h - 40f - projects.size * 58f
+        run {
+            val shownAway = if (weather == null) 0 else min(away.size, 4)
+            val from = if (weather == null) 470f else if (shownAway > 0) 514f + shownAway * AWAY_STEP + 18f else 540f
+            val room = ((y - 36f - from - 30f) / UP_ROW).toInt()
+            if (room >= 1) drawUpcoming(canvas, x, from + 20f, right - x, art.paper, min(room, 4), plaque = false, shadow = false)
+        }
         projects.forEachIndexed { i, p ->
             drawIcon(canvas, p, x, y - 2f, 28f)
             drawMark(canvas, p.status, x + 45f, y + 12f)
@@ -561,6 +647,11 @@ class DashboardView(context: Context) : View(context) {
         }
         quiet(w / 2 - 390f, 80f, w / 2 + 390f, 420f + min(3, away.size) * 30f)
         drawMusic(canvas, w / 2, 444f + min(3, away.size) * 30f, 700f, WHITE, 0.9f, Paint.Align.CENTER, shadow = true)
+        run {
+            val from = 470f + min(3, away.size) * 30f + (if (music == null) 0f else 30f)
+            val room = ((h - 280f - from) / UP_ROW).toInt()
+            if (room >= 1) drawUpcoming(canvas, w / 2 - 380f, from + 24f, 760f, WHITE, min(room, 3), plaque = true, shadow = true)
+        }
     }
 
     // --- shared pieces --------------------------------------------------------------------
@@ -680,6 +771,7 @@ class DashboardView(context: Context) : View(context) {
             learnOpen -> learnOpen = false
             plaque.contains(event.x, event.y) -> learnOpen = true
             tune.contains(event.x, event.y) -> onMusic?.invoke()
+            upcoming.contains(event.x, event.y) -> onAgenda?.invoke()
             spot != null -> onWeather?.invoke(spot.second, event.x, event.y)
             studio.contains(event.x, event.y) || studio2.contains(event.x, event.y) -> onProjects?.invoke()
             else -> {
@@ -701,6 +793,9 @@ class DashboardView(context: Context) : View(context) {
         private const val SKY_W = 22f
         private const val NOTE_W = 22f
         private const val AWAY_STEP = 27f
+        private const val UP_ROW = 48f
+        private const val UP_DIVIDER = 30f
+        private const val UP_TIME_W = 86f
         private const val LEARN_W = 564f
         private const val LEARN_TEXT_W = 460
         private const val WAITING_DOTS = 10

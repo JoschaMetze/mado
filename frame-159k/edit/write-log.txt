@@ -1,0 +1,31 @@
+range 5: wl sector 5858680 x2: rc=0 ['Write LBA from file (100%)']
+range 5: readback == NEW OK
+range 6: wl sector 5858688 x1: rc=0 ['Write LBA from file (100%)']
+range 6: readback == NEW OK
+range 7: wl sector 5858696 x1: rc=0 ['Write LBA from file (100%)']
+range 7: readback == NEW OK
+range 9: wl sector 22562167 x1: rc=0 ['Write LBA from file (100%)']
+range 9: readback == NEW OK
+range 12: wl sector 26756356 x1: rc=0 ['Write LBA from file (100%)']
+range 12: readback == NEW OK
+range 13: wl sector 26756364 x1: rc=0 ['Write LBA from file (100%)']
+range 13: readback == NEW OK
+range 10: wl sector 22627888 x1: rc=0 ['Write LBA from file (100%)']
+range 10: readback == NEW OK
+range 14: wl sector 26821889 x1: rc=0 ['Write LBA from file (100%)']
+range 14: readback == NEW OK
+range 4: wl sector 5792834 x1: rc=0 ['Write LBA from file (100%)']
+range 4: readback == NEW OK
+range 8: wl sector 22561920 x1: rc=0 ['Write LBA from file (100%)']
+range 8: readback == NEW OK
+range 11: wl sector 26756224 x1: rc=0 ['Write LBA from file (100%)']
+range 11: readback == NEW OK
+range 1: wl sector 5784584 x1: rc=0 ['Write LBA from file (100%)']
+range 1: readback == NEW OK
+range 2: wl sector 5784592 x1: rc=0 ['Write LBA from file (100%)']
+range 2: readback == NEW OK
+range 3: wl sector 5784594 x1: rc=0 ['Write LBA from file (100%)']
+range 3: readback == NEW OK
+range 0: wl sector 5784578 x1: rc=0 ['Write LBA from file (100%)']
+range 0: readback == NEW OK
+write done for ranges 5 6 7 9 12 13 10 14 4 8 11 1 2 3 0

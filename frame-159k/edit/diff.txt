@@ -1,0 +1,16 @@
+15 changed ranges, 16 sectors, 8192 bytes
+  range 0: sector 5784578 (0xb0880400 into partition), 1 sectors
+  range 1: sector 5784584 (0xb0881000 into partition), 1 sectors
+  range 2: sector 5784592 (0xb0882000 into partition), 1 sectors
+  range 3: sector 5784594 (0xb0882400 into partition), 1 sectors
+  range 4: sector 5792834 (0xb0c88400 into partition), 1 sectors
+  range 5: sector 5858680 (0xb2caf000 into partition), 2 sectors
+  range 6: sector 5858688 (0xb2cb0000 into partition), 1 sectors
+  range 7: sector 5858696 (0xb2cb1000 into partition), 1 sectors
+  range 8: sector 22561920 (0x2b0890000 into partition), 1 sectors
+  range 9: sector 22562167 (0x2b08aee00 into partition), 1 sectors
+  range 10: sector 22627888 (0x2b28c6000 into partition), 1 sectors
+  range 11: sector 26756224 (0x330890000 into partition), 1 sectors
+  range 12: sector 26756356 (0x3308a0800 into partition), 1 sectors
+  range 13: sector 26756364 (0x3308a1800 into partition), 1 sectors
+  range 14: sector 26821889 (0x3328a0200 into partition), 1 sectors

@@ -9,6 +9,7 @@ use axum::{
 use base64::Engine;
 use serde_json::{json, Value};
 
+use crate::calendar;
 use crate::{projects, Companion, Notify, Shared, COMPANION_ACTIONS};
 
 const PROTOCOL: &str = "2025-06-18";
@@ -140,6 +141,11 @@ fn tools() -> Value {
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
+            "name": "frame_agenda",
+            "description": "The owner's calendar as the frame shows it: today and the next days, with wall-clock start and end in the frame's time zone, titles (or \"Busy\" when titles are hidden), and whether each is online. Attendees and bodies are never included.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
             "name": "frame_state",
             "description": "Return which frames are connected, what Tama is doing and how its quest is going, whether the frame is asleep, the hub's config and recent activity.",
             "inputSchema": { "type": "object", "properties": {} }
@@ -169,6 +175,7 @@ async fn call(hub: &Shared, params: &Value) -> Value {
                     "data": base64::engine::general_purpose::STANDARD.encode(jpeg) })
         }),
         "frame_state" => Ok(text(hub.state())),
+        "frame_agenda" => Ok(text(calendar::message(hub))),
         other => Err(format!("unknown tool {other}")),
     };
     match outcome {

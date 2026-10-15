@@ -31,6 +31,13 @@ class RailView(context: Context) : View(context) {
     var onSleep: ((Boolean) -> Unit)? = null
     /** The hub's corner was tapped: the way to choose another hub. */
     var onHub: (() -> Unit)? = null
+    /** Tapping the orientation row asks the activity to turn the screen the next way round. */
+    var onOrientation: (() -> Unit)? = null
+    var orientationName = "Landscape"
+        set(value) {
+            field = value
+            invalidate()
+        }
     /** Night mode is on, by the hours or because someone asked. */
     var asleep = false
         set(value) {
@@ -118,6 +125,15 @@ class RailView(context: Context) : View(context) {
 
         small.alpha = 150
         canvas.drawText("MADO", PAD, 62f, small)
+        // Orientation lives on the header line: a screen glyph in the current shape and the name. Tap to turn.
+        val portrait = orientationName.startsWith("Portrait")
+        val short = orientationName.uppercase().replace(", ", " ")
+        small.textAlign = Paint.Align.RIGHT
+        canvas.drawText(short, W - PAD, 62f, small)
+        val glyphRight = W - PAD - small.measureText(short) - 12f
+        if (portrait) rect.set(glyphRight - 10f, 48f, glyphRight, 62f) else rect.set(glyphRight - 16f, 51f, glyphRight, 61f)
+        canvas.drawRoundRect(rect, 2f, 2f, stroke)
+        small.textAlign = Paint.Align.LEFT
 
         val step = rowStep()
         scenes.forEachIndexed { i, name ->
@@ -245,6 +261,11 @@ class RailView(context: Context) : View(context) {
         val scene = ((downY - SCENE_Y) / rowStep()).toInt()
         when {
             !lifted -> settle(true)
+            // The orientation control on the header line.
+            downY < 84f && downX > W * 0.35f -> {
+                settle(false)
+                onOrientation?.invoke()
+            }
             downY > height - HUB_H -> {
                 settle(false)
                 onHub?.invoke()

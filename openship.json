@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openship.io/openship.schema.json",
+  "composePath": "deploy/openship-compose.yml"
+}

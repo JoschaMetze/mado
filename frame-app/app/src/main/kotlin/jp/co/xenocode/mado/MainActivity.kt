@@ -19,6 +19,8 @@ import android.text.InputType
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
@@ -31,6 +33,13 @@ import kotlin.math.min
 
 class MainActivity : Activity(), HubLink.Listener {
     private lateinit var root: FrameLayout
+    private lateinit var agendaView: AgendaView
+    private var agenda = Agenda.EMPTY
+
+    /** Logical stage: Mado's layouts are drawn for 1280x800. */
+    private val STAGE_W = 1280
+    private val STAGE_H = 800
+    private val ORIENTATIONS = listOf("landscape", "portrait", "landscape-flipped", "portrait-flipped")
     private lateinit var alerts: AlertView
     private lateinit var rail: RailView
     private lateinit var tama: TamaView
@@ -140,6 +149,9 @@ class MainActivity : Activity(), HubLink.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // `--es orientation portrait` (landscape, portrait, landscape-flipped, portrait-flipped) is remembered.
+        intent?.getStringExtra("orientation")?.let { if (it in ORIENTATIONS) prefs().edit().putString("orientation", it).apply() }
+        requestedOrientation = screenOrientationFor(orientation())
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         alerts = AlertView(this).apply {
             onPresented = {
@@ -171,6 +183,7 @@ class MainActivity : Activity(), HubLink.Listener {
             layout = prefs().getInt("dashboard_layout", DashboardView.FULL_BLEED)
             onLayoutChosen = { prefs().edit().putInt("dashboard_layout", it).apply() }
             onProjects = { projectsPage.open() }
+            onAgenda = { showScene(AGENDA) }
             onMusic = {
                 showScene(NOW_PLAYING)
                 lingerOnNowPlaying()
@@ -183,6 +196,7 @@ class MainActivity : Activity(), HubLink.Listener {
         }
         messages.restore(getSharedPreferences("messages", MODE_PRIVATE).getString("log", null))
         messagesPage = MessagesView(this).apply { setMessages(messages.all) }
+        agendaView = AgendaView(this).apply { onClose = { showScene(HOME) } }
         restoreQuest()
         // Set after the catch-up, which happens before Tama is on the glass to show any of it.
         quest.onCrossover = ::crossover
@@ -191,7 +205,7 @@ class MainActivity : Activity(), HubLink.Listener {
             onCover = { covered -> scenes[scene].visibility = if (covered) View.INVISIBLE else View.VISIBLE }
             onClosing = { tama.away = false }
         }
-        scenes = listOf(dashboard, nowPlaying)
+        scenes = listOf(dashboard, nowPlaying, agendaView)
         tama = TamaView(this).apply {
             visibility = if (prefs().getBoolean("tama", true)) View.VISIBLE else View.GONE
             sound = prefs().getBoolean("tama_sound", false)
@@ -203,7 +217,7 @@ class MainActivity : Activity(), HubLink.Listener {
             keepOut = {
                 tamaZones.clear()
                 tamaZones.addAll(
-                    if (asleep) nightView.textZones else if (weatherPage.isOpen) weatherPage.textZones else if (scene == DASHBOARD) dashboard.textZones else nowPlaying.textZones
+                    if (asleep) nightView.textZones else if (weatherPage.isOpen) weatherPage.textZones else if (scene == DASHBOARD) dashboard.textZones else if (scene == AGENDA) agendaView.textZones else nowPlaying.textZones
                 )
                 if (!alerts.zone.isEmpty) tamaZones.add(alerts.zone)
                 tamaZones
@@ -252,7 +266,20 @@ class MainActivity : Activity(), HubLink.Listener {
             addView(alerts)
             addView(rail)
         }
-        setContentView(root)
+        // Mado's layouts are drawn in pixels for a 1280x800 screen. The whole tree sits on a
+        // stage scaled uniformly so that canvas fits the screen; the axis with room to spare
+        // gets a longer logical canvas (1422x800 on a 1920x1080 frame lying down, 1280x2275
+        // standing up). View scaling also maps touches.
+        root.pivotX = 0f
+        root.pivotY = 0f
+        val outer = FrameLayout(this).apply {
+            setBackgroundColor(android.graphics.Color.BLACK)
+            addView(root, FrameLayout.LayoutParams(STAGE_W, STAGE_H))
+        }
+        setContentView(outer)
+        fitStage()
+        rail.orientationName = orientationLabel(orientation())
+        rail.onOrientation = { applyOrientation(ORIENTATIONS[(ORIENTATIONS.indexOf(orientation()) + 1) % ORIENTATIONS.size]) }
         clockSet = System.currentTimeMillis() > CLOCK_SET_AFTER_MS
         adoptHubAddress(intent)
         connect()
@@ -270,6 +297,15 @@ class MainActivity : Activity(), HubLink.Listener {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (adoptHubAddress(intent)) connect()
+        intent.getStringExtra("orientation")?.let { if (it in ORIENTATIONS) applyOrientation(it) }
+        // `--es scene agenda` (home, music, agenda) switches scenes, for scripts and for looking at the frame remotely.
+        // `--ei layout 0..3` picks a dashboard layout (full bleed, matted, split, pigments), as a tap on the glass does.
+        intent.getIntExtra("layout", -1).takeIf { it >= 0 }?.let { dashboard.layout = it; prefs().edit().putInt("dashboard_layout", dashboard.layout).apply() }
+        when (intent.getStringExtra("scene")) {
+            "home" -> showScene(HOME)
+            "music" -> showScene(NOW_PLAYING)
+            "agenda" -> showScene(AGENDA)
+        }
         val wanted = intent.getStringExtra("tama")
         Hobby.values().firstOrNull { it.name.equals(wanted, ignoreCase = true) }?.let(tama::perform)
         // Debug builds only, for looking at how Tama dresses: `--es tama_sky rain --ei tama_temp 3 --ez tama_music true`,
@@ -281,6 +317,11 @@ class MainActivity : Activity(), HubLink.Listener {
                 tama.pinFace(it.getOrElse(0) { "" }, it.getOrElse(1) { "" }, it.getOrElse(2) { "" }, it.getOrNull(3) == "tear")
             }
             if (intent.hasExtra("tama_music")) tama.music = intent.getBooleanExtra("tama_music", false)
+            // `--es agenda_demo scene` fills the calendar with a made-up day and opens the agenda; any other value keeps the dashboard.
+            intent.getStringExtra("agenda_demo")?.let { mode ->
+                showAgenda(Agenda.demo(System.currentTimeMillis()))
+                if (mode == "scene") showScene(AGENDA) else showScene(HOME)
+            }
             // The quest: `--es quest open` (or beat, to move it on twenty beats, or visit), and Tama's
             // needs: `--es tama_need hungry` (or sniffles, tummy, hiccups, glitch, well; feed and medicine
             // are a tap on Tama).
@@ -337,6 +378,48 @@ class MainActivity : Activity(), HubLink.Listener {
     }
 
     private fun prefs() = getSharedPreferences("mado", MODE_PRIVATE)
+
+    private fun orientation() = prefs().getString("orientation", null)?.takeIf { it in ORIENTATIONS } ?: "landscape"
+
+    private fun orientationLabel(name: String) = when (name) {
+        "portrait" -> "Portrait"
+        "portrait-flipped" -> "Portrait, flipped"
+        "landscape-flipped" -> "Landscape, flipped"
+        else -> "Landscape"
+    }
+
+    private fun screenOrientationFor(name: String) = when (name) {
+        "portrait" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        "portrait-flipped" -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+        "landscape-flipped" -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+        else -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+    }
+
+    /** Turns the screen and remembers it. The manifest keeps orientation changes in-process, so the stage is refitted. */
+    private fun applyOrientation(name: String) {
+        prefs().edit().putString("orientation", name).apply()
+        rail.orientationName = orientationLabel(name)
+        requestedOrientation = screenOrientationFor(name)
+        root.post { fitStage() }
+    }
+
+    /** Sizes and scales the stage for the screen as it is now. */
+    private fun fitStage() {
+        val real = android.graphics.Point().also { windowManager.defaultDisplay.getRealSize(it) }
+        if (real.x == 0 || real.y == 0) return
+        val scale = minOf(real.x / STAGE_W.toFloat(), real.y / STAGE_H.toFloat())
+        val w = Math.round(real.x / scale)
+        val h = Math.round(real.y / scale)
+        root.scaleX = scale
+        root.scaleY = scale
+        val lp = root.layoutParams as? FrameLayout.LayoutParams
+        if (lp == null || lp.width != w || lp.height != h) root.layoutParams = FrameLayout.LayoutParams(w, h)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        root.post { fitStage() }
+    }
 
     private fun adoptHubAddress(intent: Intent?): Boolean {
         val hub = intent?.getStringExtra("hub") ?: return false
@@ -693,9 +776,22 @@ class MainActivity : Activity(), HubLink.Listener {
                     tama.notice()
                     projectsPage.setArt(art)
                     messagesPage.setArt(art)
+                    agendaView.setArt(art)
                 }
             }
         }
+    }
+
+    /** The owner's calendar, as the hub last read it. */
+    private fun agenda(msg: JSONObject) {
+        showAgenda(Agenda.parse(msg))
+    }
+
+    private fun showAgenda(agenda: Agenda) {
+        this.agenda = agenda
+        dashboard.setAgenda(agenda)
+        agendaView.setAgenda(agenda)
+        markRail()
     }
 
     private fun projects(msg: JSONObject) {
@@ -782,6 +878,7 @@ class MainActivity : Activity(), HubLink.Listener {
             "companion" -> tama.act(msg.optString("action"), msg.optLong("ttl_s") * 1000)
             "art" -> painting(msg)
             "projects" -> projects(msg)
+            "agenda" -> agenda(msg)
             "look" -> look(msg.optLong("req"))
             // Saved, so the places and the night's hours are still known with the hub away.
             "config" -> {
@@ -858,7 +955,7 @@ class MainActivity : Activity(), HubLink.Listener {
      */
     private fun markRail() {
         val rows = listOfNotNull(
-            DASHBOARD_ROW, NOW_PLAYING_ROW,
+            DASHBOARD_ROW, NOW_PLAYING_ROW, AGENDA_ROW.takeIf { agenda.signedIn || agenda.events.isNotEmpty() },
             WEATHER_ROW.takeIf { weatherPlaces().isNotEmpty() }, PROJECTS_ROW.takeIf { projectList.isNotEmpty() },
             MESSAGES_ROW.takeIf { messages.all.isNotEmpty() }, QUEST_ROW,
         )
@@ -870,6 +967,7 @@ class MainActivity : Activity(), HubLink.Listener {
                 messagesPage.isOpen -> MESSAGES_ROW
                 questPage.isOpen -> QUEST_ROW
                 scene == NOW_PLAYING -> NOW_PLAYING_ROW
+                scene == AGENDA -> AGENDA_ROW
                 else -> DASHBOARD_ROW
             }
         )
@@ -877,6 +975,7 @@ class MainActivity : Activity(), HubLink.Listener {
 
     private fun goTo(row: String) {
         if (row == NOW_PLAYING_ROW) return showScene(NOW_PLAYING)
+        if (row == AGENDA_ROW) return showScene(AGENDA)
         // The pages lie over the dashboard, and only one of them at a time.
         showScene(DASHBOARD)
         if (row != PROJECTS_ROW) projectsPage.close()
@@ -1009,6 +1108,8 @@ class MainActivity : Activity(), HubLink.Listener {
     private companion object {
         const val DASHBOARD = 0
         const val NOW_PLAYING = 1
+        const val AGENDA = 2
+        const val AGENDA_ROW = "Agenda"
         const val DASHBOARD_ROW = "Dashboard"
         const val NOW_PLAYING_ROW = "Now playing"
         const val WEATHER_ROW = "Weather"

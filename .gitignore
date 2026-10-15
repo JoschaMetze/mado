@@ -1,1 +1,16 @@
 .DS_Store
+frame-app/env.local.sh
+frame-app/.gradle/
+frame-app/build/
+frame-app/app/build/
+frame-app/local.properties
+hub/target/
+research/mado/
+research/*.jpg
+frame-159k/backup/
+frame-159k/helper/
+frame-159k/edit/ranges/
+.openship/
+log/
+frame-159k/docs/159k-unit-1.md
+deploy/.env

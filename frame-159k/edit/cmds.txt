@@ -1,0 +1,15 @@
+write /private/tmp/claude-501/-Users-joschametze-Library-Application-Support-Claude-scratch-workspaces-7b45fa6f-39c8-47c9-b6ef-36bbf04f3d90-27466af7-5016-4016-99c6-20b1fa6ced65-scratch-2026-10-14-60baa1/48f1e5c7-abd9-4487-8307-a87ba7de7d28/scratchpad/edit/adb_keys /misc/adb/adb_keys
+set_inode_field /misc/adb/adb_keys mode 0100640
+set_inode_field /misc/adb/adb_keys uid 1000
+set_inode_field /misc/adb/adb_keys gid 2000
+ea_set -f /private/tmp/claude-501/-Users-joschametze-Library-Application-Support-Claude-scratch-workspaces-7b45fa6f-39c8-47c9-b6ef-36bbf04f3d90-27466af7-5016-4016-99c6-20b1fa6ced65-scratch-2026-10-14-60baa1/48f1e5c7-abd9-4487-8307-a87ba7de7d28/scratchpad/edit/ctx-adb_keys /misc/adb/adb_keys security.selinux
+write /private/tmp/claude-501/-Users-joschametze-Library-Application-Support-Claude-scratch-workspaces-7b45fa6f-39c8-47c9-b6ef-36bbf04f3d90-27466af7-5016-4016-99c6-20b1fa6ced65-scratch-2026-10-14-60baa1/48f1e5c7-abd9-4487-8307-a87ba7de7d28/scratchpad/edit/persist.adb.tcp.port /property/persist.adb.tcp.port
+set_inode_field /property/persist.adb.tcp.port mode 0100600
+set_inode_field /property/persist.adb.tcp.port uid 0
+set_inode_field /property/persist.adb.tcp.port gid 0
+ea_set -f /private/tmp/claude-501/-Users-joschametze-Library-Application-Support-Claude-scratch-workspaces-7b45fa6f-39c8-47c9-b6ef-36bbf04f3d90-27466af7-5016-4016-99c6-20b1fa6ced65-scratch-2026-10-14-60baa1/48f1e5c7-abd9-4487-8307-a87ba7de7d28/scratchpad/edit/ctx-property /property/persist.adb.tcp.port security.selinux
+write /private/tmp/claude-501/-Users-joschametze-Library-Application-Support-Claude-scratch-workspaces-7b45fa6f-39c8-47c9-b6ef-36bbf04f3d90-27466af7-5016-4016-99c6-20b1fa6ced65-scratch-2026-10-14-60baa1/48f1e5c7-abd9-4487-8307-a87ba7de7d28/scratchpad/edit/persist.internet.adb.enable /property/persist.internet.adb.enable
+set_inode_field /property/persist.internet.adb.enable mode 0100600
+set_inode_field /property/persist.internet.adb.enable uid 0
+set_inode_field /property/persist.internet.adb.enable gid 0
+ea_set -f /private/tmp/claude-501/-Users-joschametze-Library-Application-Support-Claude-scratch-workspaces-7b45fa6f-39c8-47c9-b6ef-36bbf04f3d90-27466af7-5016-4016-99c6-20b1fa6ced65-scratch-2026-10-14-60baa1/48f1e5c7-abd9-4487-8307-a87ba7de7d28/scratchpad/edit/ctx-property /property/persist.internet.adb.enable security.selinux

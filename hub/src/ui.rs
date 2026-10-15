@@ -15,6 +15,7 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::calendar;
 use crate::{art, projects, Night, Notify, Place, Shared};
 
 const STYLE: &str = include_str!("ui.css");
@@ -483,6 +484,7 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
         })
         .collect();
     let state = hub.state();
+    let calendar = calendar_card(&hub);
     let np = now_playing_card(&state["now_playing"]);
     let projects = project_rows(&state["projects"]);
     let painting = painting_card(&state["art"]);
@@ -594,6 +596,7 @@ pub async fn index(State(hub): State<Shared>, headers: HeaderMap, Query(search):
     <form method="post" action="/ui/sleep"><p>{night_now} {night_button}</p></form>
     <p class="muted small">Asleep, the frame shows a dim amber clock and keeps whispers and nudges for the morning; urgent alerts still show. A touch or two knocks wakes it for a moment. It also turns itself down between sunset and sunrise.</p>
   </section>
+  {calendar}
   <section id="recent"><div class="head"><p class="eyebrow">Since the hub started</p><h2>Recent</h2></div>
     {log}
   </section>
@@ -926,5 +929,129 @@ mod tests {
         assert_eq!(log_kind("frame #3 connected"), "frame");
         assert_eq!(log_kind("art of the day failed: timeout"), "bad");
         assert_eq!(log_kind("now playing: helper went quiet"), "music");
+    }
+}
+
+/// The Calendar card: settings, sign-in state and a glance at today.
+fn calendar_card(hub: &Shared) -> String {
+    let settings = hub.config.read().unwrap().calendar.clone();
+    let status = calendar::status(hub);
+    let state = if !settings.configured() {
+        r#"<p class="muted">Not set up. Register an app in Microsoft Entra (public client, delegated <code>Calendars.Read</code> and <code>offline_access</code>), then enter its ids below and sign in.</p>"#.to_owned()
+    } else if let Some(p) = status["pending"].as_object() {
+        format!(
+            r#"<p class="flash" role="status">Waiting for you: go to <a href="{uri}" target="_blank" rel="noopener">{uri}</a> and enter the code <b><code>{code}</code></b>. This page updates when you are signed in.</p>"#,
+            uri = esc(p["uri"].as_str().unwrap_or("")),
+            code = esc(p["code"].as_str().unwrap_or("")),
+        )
+    } else if let Some(account) = status["account"].as_str() {
+        let fresh = status["updated_ago_s"]
+            .as_u64()
+            .map_or("not read yet".to_owned(), |s| format!("read {}", ago(s)));
+        let error = status["error"]
+            .as_str()
+            .map_or(String::new(), |e| format!(r#" · <span class="err">{}</span>"#, esc(e)));
+        format!(
+            r#"<p>Signed in as <b>{}</b> · {} · {} today, {} in the next {} days{}</p>
+<div class="actions"><form method="post" action="/ui/calendar/signout"><button class="quiet">Sign out</button></form></div>"#,
+            esc(account),
+            fresh,
+            status["today"],
+            status["total"],
+            settings.days,
+            error
+        )
+    } else {
+        r#"<div class="actions"><form method="post" action="/ui/calendar/signin"><button>Sign in with Microsoft</button></form></div><p class="muted small">You get a short code to enter at Microsoft's device-login page, once. The hub keeps only a refresh token, in its data folder.</p>"#.to_owned()
+    };
+    let titles = if settings.titles { " checked" } else { "" };
+    let declined = if settings.show_declined { " checked" } else { "" };
+    format!(
+        r##"<section id="calendar"><div class="head"><p class="eyebrow">Outlook</p><h2>Calendar</h2></div>
+    {state}
+    <details{open}><summary>Settings</summary>
+    <form method="post" action="/ui/calendar">
+      <div class="row"><label>Tenant (id or domain)<input name="tenant" maxlength="120" value="{tenant}" placeholder="contoso.com"></label>
+      <label>Application (client) id<input name="client_id" maxlength="60" value="{client}" placeholder="00000000-0000-0000-0000-000000000000"></label></div>
+      <div class="row"><label>Time zone<input name="timezone" maxlength="60" value="{tz}" required></label>
+      <label>Days ahead<input name="days" type="number" min="1" max="14" value="{days}" required></label>
+      <label>Nudge minutes before<input name="remind_min" type="number" min="0" max="60" value="{remind}" required></label></div>
+      <label class="check"><input type="checkbox" name="titles"{titles}> Show meeting titles (off: plain "Busy" blocks)</label>
+      <label class="check"><input type="checkbox" name="show_declined"{declined}> Keep meetings I declined</label>
+      <button>Save calendar settings</button>
+    </form></details>
+    <p class="muted small">The frame gets times, titles and the kind of place only, never attendees or bodies. JSON: <a href="/api/agenda">/api/agenda</a></p>
+  </section>"##,
+        open = if settings.configured() { "" } else { " open" },
+        tenant = esc(&settings.tenant),
+        client = esc(&settings.client_id),
+        tz = esc(&settings.timezone),
+        days = settings.days,
+        remind = settings.remind_min,
+    )
+}
+
+#[derive(Deserialize)]
+pub struct CalendarForm {
+    tenant: String,
+    client_id: String,
+    timezone: String,
+    days: u32,
+    remind_min: u32,
+    titles: Option<String>,
+    show_declined: Option<String>,
+}
+
+pub async fn calendar_settings(State(hub): State<Shared>, Form(f): Form<CalendarForm>) -> Redirect {
+    if f.timezone.parse::<chrono_tz::Tz>().is_err() {
+        return back(
+            "calendar",
+            Err("That time zone is not an IANA name like Europe/Berlin.".into()),
+        );
+    }
+    let client_id = f.client_id.trim().to_owned();
+    if !client_id.is_empty() && !client_id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return back("calendar", Err("The client id should be a GUID.".into()));
+    }
+    {
+        let mut config = hub.config.write().unwrap();
+        config.calendar = calendar::Settings {
+            tenant: f.tenant.trim().to_owned(),
+            client_id,
+            timezone: f.timezone.trim().to_owned(),
+            days: f.days.clamp(1, 14),
+            titles: f.titles.is_some(),
+            remind_min: f.remind_min.min(60),
+            show_declined: f.show_declined.is_some(),
+        };
+    }
+    let saved = hub.config_changed();
+    let h = hub.clone();
+    tokio::task::spawn_blocking(move || calendar::refresh_now(&h));
+    match saved {
+        Ok(()) => back("calendar", Ok("Calendar settings saved.")),
+        Err(e) => back("calendar", Err(format!("Changed, but not saved to disk: {e}"))),
+    }
+}
+
+pub async fn calendar_signin(State(hub): State<Shared>) -> Redirect {
+    let h = hub.clone();
+    match tokio::task::spawn_blocking(move || calendar::begin_sign_in(&h)).await {
+        Ok(Ok(p)) => back(
+            "calendar",
+            Ok(&format!(
+                "Go to {} and enter the code {}.",
+                p.verification_uri, p.user_code
+            )),
+        ),
+        Ok(Err(e)) => back("calendar", Err(e)),
+        Err(e) => back("calendar", Err(e.to_string())),
+    }
+}
+
+pub async fn calendar_signout(State(hub): State<Shared>) -> Redirect {
+    match calendar::sign_out(&hub) {
+        Ok(()) => back("calendar", Ok("Signed out; the frame's agenda is cleared.")),
+        Err(e) => back("calendar", Err(e)),
     }
 }

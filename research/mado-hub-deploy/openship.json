@@ -1,0 +1,22 @@
+{
+  "$schema": "https://openship.io/openship.schema.json",
+  "runtime": "docker",
+  "services": [
+    {
+      "name": "hub",
+      "build": "./hub",
+      "dockerfile": "hub/Dockerfile",
+      "ports": ["7878", "7879"],
+      "exposed": true,
+      "exposedPort": "7878",
+      "env": {
+        "MADO_BIND": "0.0.0.0:7878",
+        "MADO_FRAME_BIND": "0.0.0.0:7879",
+        "MADO_ADVERTISE": "off",
+        "MADO_NAME": "Mado on vm",
+        "MADO_DATA": "/data"
+      },
+      "volumes": ["mado-data:/data"]
+    }
+  ]
+}

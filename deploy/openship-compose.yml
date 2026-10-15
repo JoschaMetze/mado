@@ -1,0 +1,20 @@
+# Mado hub (our fork in ../hub) for Openship on the VM.
+# Host ports: 7878 = web page/API/MCP on the tailnet address, 7879 = frame socket on the LAN address.
+services:
+  hub:
+    build:
+      context: ../hub
+    restart: unless-stopped
+    ports:
+      - "${HUB_TAILNET_IP:?set HUB_TAILNET_IP in deploy/.env}:7878:7878"   # web page, API, MCP: tailnet only
+      - "${HUB_LAN_IP:?set HUB_LAN_IP in deploy/.env}:7879:7879"           # frame socket: LAN only
+    environment:
+      MADO_BIND: "0.0.0.0:7878"
+      MADO_FRAME_BIND: "0.0.0.0:7879"
+      MADO_ADVERTISE: "off"
+      MADO_NAME: "Mado on vm"
+      MADO_DATA: "/data"
+    volumes:
+      - mado-data:/data   # root-owned when Openship creates it: chown to 65534 once (see research/hub-deployment-plan.md)
+volumes:
+  mado-data:

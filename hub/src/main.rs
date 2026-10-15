@@ -4,6 +4,7 @@
 //! plain HTTP (`/api/*`), MCP (`/mcp`) or the web interface (`/`); the hub relays to the frame.
 
 mod art;
+mod calendar;
 mod discover;
 mod mcp;
 mod nowplaying;
@@ -57,6 +58,9 @@ pub struct Config {
     /// When the frame sleeps. The frame keeps these hours itself, hub or no hub.
     #[serde(default)]
     pub night: Night,
+    /// The owner's Outlook calendar, shown as an agenda.
+    #[serde(default)]
+    pub calendar: calendar::Settings,
 }
 
 /// The hours the frame shows only its night clock, as "HH:MM" on the frame's own clock.
@@ -161,6 +165,7 @@ pub struct Hub {
     pub quest: Mutex<Option<String>>,
     /// Whether the frame said it is in night mode; None until one has said.
     pub asleep: Mutex<Option<bool>>,
+    pub calendar: Mutex<calendar::Calendar>,
     pub data_dir: PathBuf,
     looks: Mutex<HashMap<u64, oneshot::Sender<String>>>,
     next_id: AtomicU64,
@@ -178,6 +183,7 @@ impl Hub {
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
+        let calendar = calendar::load(&data_dir);
         Hub {
             frames: Mutex::default(),
             config: RwLock::new(config),
@@ -190,6 +196,7 @@ impl Hub {
             tama: Mutex::default(),
             quest: Mutex::default(),
             asleep: Mutex::default(),
+            calendar: Mutex::new(calendar),
             data_dir,
             looks: Mutex::default(),
             next_id: AtomicU64::new(1),
@@ -338,7 +345,7 @@ impl Hub {
         let asleep = *self.asleep.lock().unwrap();
         json!({
             "frames": frames, "tama": tama, "quest": quest, "asleep": asleep, "now_playing": now_playing, "art": art, "projects": projects,
-            "config": *self.config.read().unwrap(), "recent": recent,
+            "config": *self.config.read().unwrap(), "recent": recent, "calendar": calendar::status(self),
         })
     }
 
@@ -396,6 +403,7 @@ async fn frame_session(socket: WebSocket, hub: Shared) {
     let _ = tx.send(json!({ "t": "config", "config": *hub.config.read().unwrap() }).to_string());
     let _ = tx.send(hub.now_playing.lock().unwrap().message().to_string());
     let _ = tx.send(hub.projects_message().to_string());
+    let _ = tx.send(calendar::hello(&hub));
     hub.frames.lock().unwrap().insert(
         id,
         FrameConn {
@@ -523,6 +531,11 @@ async fn main() {
         .route("/ui/theme", post(ui::theme))
         .route("/ui/night", post(ui::night))
         .route("/ui/sleep", post(ui::sleep))
+        .route("/ui/calendar", post(ui::calendar_settings))
+        .route("/ui/calendar/signin", post(ui::calendar_signin))
+        .route("/ui/calendar/signout", post(ui::calendar_signout))
+        .route("/api/agenda", get(calendar::api_agenda))
+        .route("/api/calendar/refresh", post(calendar::api_refresh))
         .route("/api/notify", post(api_notify))
         .route("/api/companion", post(api_companion))
         .route("/api/sleep", post(api_sleep))
@@ -542,6 +555,7 @@ async fn main() {
         .merge(frame_routes.clone())
         .with_state(hub.clone());
     tokio::spawn(nowplaying::expire_silent_helper(hub.clone()));
+    tokio::spawn(calendar::run(hub.clone()));
 
     // MADO_FRAME_BIND opens a second port that serves only the frame's routes. It lets the
     // frame reach the hub on a network where the API, MCP and web page must not be exposed.
